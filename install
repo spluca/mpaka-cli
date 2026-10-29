@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly INSTALLER_NAME="mpaka installer"
+readonly DEFAULT_BASE_URL="https://cli.mpaka.dev"
+INSTALL_TEMP_DIR=''
+readonly EMBEDDED_PUBLIC_KEY_PEM="-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAj4+ezaZgsT5NlaDScaKn
+oxXg+CjSmYQLRxe6zHFZTkAj668hHFlgWX7zrYlxLy9qSb29uj4JyBLyCISZOdye
+FumDXOZOiVwVl2HDINiaWAAHzRSC7Jm21MZ5DYR6fV2gm50Rm+r8DO72OhlQqH/T
+R5UKnUN8YxnlJZoVb73PqxFnwpYN7E0Cuc8D0VI47Vor06gdvTTaXCY+L7+UlT/H
+kcd2UeMkBQcYtusdqvBn1hVeIg3UYQL2QoaN5DNTHtGg5Xoj3FtaJt5QFWqO/hUs
+DAb3IvFxwWkik9kbLpMhuN5RQlMHOXmZPDIkl49thFw6FHgCYPUiUYC+XBOkOzTv
+KzvrwcFabuosV7Sw/Mg1F8hSsdrfnWSphXPvHukrm7SPAQy1Fm80r+YpplwIWJ7s
+59mlh3lfJbzwa6Mej92TmXh35EiV3ImOBdTx8Y7LIdHS2m6YmxxZYiDgDIc//027
+/Vrt9RLw5cYgJKvFWhmvPLAX44naMd+fNQENa8e+DP6tAgMBAAE=
+-----END PUBLIC KEY-----"
+
+die() {
+  printf '%s: %s\n' "$INSTALLER_NAME" "$*" >&2
+  exit 1
+}
+
+usage() {
+  printf 'Usage: install [--version vMAJOR.MINOR.PATCH]\n' >&2
+  exit 2
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "required command is unavailable: $1"
+}
+
+version_valid() {
+  [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+target_for_host() {
+  local os="${MPAKA_CLI_TEST_UNAME_S:-$(uname -s)}"
+  local arch="${MPAKA_CLI_TEST_UNAME_M:-$(uname -m)}"
+  case "$os:$arch" in
+    Linux:x86_64) printf '%s' 'x86_64-unknown-linux-musl' ;;
+    Linux:armv7l|Linux:armv7) printf '%s' 'armv7-unknown-linux-musleabihf' ;;
+    Linux:aarch64|Linux:arm64) printf '%s' 'aarch64-unknown-linux-musl' ;;
+    Darwin:x86_64) printf '%s' 'x86_64-apple-darwin' ;;
+    Darwin:arm64|Darwin:aarch64) printf '%s' 'aarch64-apple-darwin' ;;
+    *) die "unsupported platform: operating system $os, architecture $arch" ;;
+  esac
+}
+
+archive_for_target() {
+  case "$1" in
+    x86_64-unknown-linux-musl) printf '%s' 'mpaka-x86_64-unknown-linux-musl.tar.gz' ;;
+    armv7-unknown-linux-musleabihf) printf '%s' 'mpaka-armv7-unknown-linux-musleabihf.tar.gz' ;;
+    aarch64-unknown-linux-musl) printf '%s' 'mpaka-aarch64-unknown-linux-musl.tar.gz' ;;
+    x86_64-apple-darwin) printf '%s' 'mpaka-x86_64-apple-darwin.tar.gz' ;;
+    aarch64-apple-darwin) printf '%s' 'mpaka-aarch64-apple-darwin.tar.gz' ;;
+    *) die "no Unix artifact exists for target $1" ;;
+  esac
+}
+
+download() {
+  local url="$1" destination="$2" base_url="$3"
+  case "$url" in
+    https://*) ;;
+    *) die "refusing non-HTTPS URL: $url" ;;
+  esac
+  local args=(--silent --show-error --fail --location --max-redirs 3 --proto '=https' --proto-redir '=https' --max-time 60 --max-filesize 52428800)
+  if [[ -n "${MPAKA_CLI_CA_CERT:-}" ]]; then args+=(--cacert "$MPAKA_CLI_CA_CERT"); fi
+  curl "${args[@]}" "$url" --output "$destination" || die "download failed: $url"
+  : "$base_url"
+}
+
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    die 'required SHA-256 utility is unavailable (need sha256sum or shasum)'
+  fi
+}
+
+main() {
+  local requested_version=''
+  while (($#)); do
+    case "$1" in
+      --version) requested_version="${2:-}"; shift 2 ;;
+      --help|-h) usage ;;
+      *) usage ;;
+    esac
+  done
+
+  local target
+  target="$(target_for_host)"
+  if [[ "${MPAKA_CLI_TEST_ONLY_TARGET:-0}" == 1 ]]; then
+    printf 'target=%s\n' "$target"
+    return 0
+  fi
+  require_command curl
+  require_command openssl
+  require_command tar
+  local base_url="${MPAKA_CLI_BASE_URL:-$DEFAULT_BASE_URL}"
+  [[ "$base_url" == https://* ]] || die 'release base URL must use HTTPS'
+  base_url="${base_url%/}"
+  local temp_dir
+  temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mpaka-install.XXXXXX")"
+  INSTALL_TEMP_DIR="$temp_dir"
+  trap 'rm -rf "$INSTALL_TEMP_DIR"' EXIT
+
+  local version
+  if [[ -n "$requested_version" ]]; then
+    version="$requested_version"
+  else
+    download "$base_url/latest" "$temp_dir/latest" "$base_url"
+    version="$(tr -d '\r\n' < "$temp_dir/latest")"
+  fi
+  version_valid "$version" || die "invalid release version: $version"
+
+  local public_key="$temp_dir/public.pem"
+  printf '%s\n' "${MPAKA_CLI_TEST_PUBLIC_KEY_PEM:-$EMBEDDED_PUBLIC_KEY_PEM}" > "$public_key"
+  local manifest="$temp_dir/manifest.json" signature="$temp_dir/manifest.json.sig"
+  download "$base_url/releases/$version/manifest.json" "$manifest" "$base_url"
+  download "$base_url/releases/$version/manifest.json.sig" "$signature" "$base_url"
+  openssl dgst -sha256 -verify "$public_key" -signature "$signature" "$manifest" >/dev/null \
+    || die 'manifest signature verification failed'
+
+  local manifest_version
+  manifest_version="$(sed -n 's/.*"version":"\(v[0-9][0-9.]*\)".*/\1/p' "$manifest")"
+  [[ "$manifest_version" == "$version" ]] || die 'manifest version does not match requested version'
+  local artifact_line filename expected_hash expected_size
+  artifact_line="$(sed -n "s/.*\"filename\":\"\([^\"]*\)\",\"sha256\":\"\([0-9a-fA-F]\{64\}\)\",\"size\":\([0-9][0-9]*\),\"target\":\"$target\".*/\1\t\2\t\3/p" "$manifest")"
+  IFS=$'\t' read -r filename expected_hash expected_size <<< "$artifact_line"
+  [[ -n "$filename" && -n "$expected_hash" && -n "$expected_size" ]] || die "manifest has no artifact for target $target"
+  [[ "$filename" == "$(archive_for_target "$target")" ]] || die "manifest selected an unexpected archive for target $target"
+  archive="$temp_dir/$filename"
+  download "$base_url/releases/$version/$filename" "$archive" "$base_url"
+  [[ "$(wc -c < "$archive" | tr -d '[:space:]')" == "$expected_size" ]] || die 'downloaded artifact size does not match manifest'
+  [[ "$(sha256_file "$archive")" == "$expected_hash" ]] || die 'downloaded artifact SHA-256 does not match manifest'
+
+  local executable='mpaka' listing
+  listing="$(tar -tzf "$archive")"
+  [[ "$listing" == "$executable" ]] || die 'archive contains unexpected entries'
+  mkdir "$temp_dir/extract"
+  tar -xzf "$archive" -C "$temp_dir/extract" --no-same-owner
+  [[ -f "$temp_dir/extract/$executable" && ! -L "$temp_dir/extract/$executable" ]] || die 'archive did not contain a regular mpaka file'
+  chmod 0755 "$temp_dir/extract/$executable"
+
+  local install_dir="${HOME:?}/.local/bin" destination temporary
+  mkdir -p "$install_dir"
+  [[ ! -L "$install_dir" && ! -L "$install_dir/mpaka" ]] || die 'refusing to install through a symlink'
+  destination="$install_dir/mpaka"
+  temporary="$(mktemp "$install_dir/.mpaka.XXXXXX")"
+  cp "$temp_dir/extract/$executable" "$temporary"
+  chmod 0755 "$temporary"
+  mv -f "$temporary" "$destination"
+  printf 'Installed mpaka %s for %s at %s\n' "$version" "$target" "$destination"
+  case ":${PATH:-}:" in
+    *":$install_dir:"*) ;;
+    *) printf 'Add %s to PATH to run mpaka directly.\n' "$install_dir" ;;
+  esac
+}
+
+main "$@"

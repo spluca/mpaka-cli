@@ -1,0 +1,272 @@
+name: mPaka CLI release
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: '1'
+
+jobs:
+  contract:
+    name: CLI distribution contract
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, rustbox-cli]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: taiki-e/install-action@nextest
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.11
+          dest: ${{ runner.temp }}/mpaka-cli-contract-pnpm-${{ github.run_id }}-${{ github.run_attempt }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Check Rust contract
+        run: |
+          cargo fmt --all -- --check
+          cargo nextest run --locked
+          cargo clippy --locked --all-targets -- -D warnings
+      - name: Check release, installers, and docs
+        run: |
+          make release-test
+          make installer-test
+          make powershell-test
+          make workflow-test
+          make docs-test
+      - name: Check distribution Worker
+        working-directory: cli-distribution
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm test
+          pnpm exec wrangler deploy --dry-run
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: contract
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            cross: true
+          - target: armv7-unknown-linux-musleabihf
+            cross: true
+          - target: aarch64-unknown-linux-musl
+            cross: true
+          - target: x86_64-pc-windows-msvc
+            cross: false
+          - target: x86_64-apple-darwin
+            cross: false
+          - target: aarch64-apple-darwin
+            cross: false
+    runs-on: [self-hosted, Linux, X64, rustbox-cli]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: matrix.cross
+        uses: taiki-e/install-action@cross
+      - if: startsWith(matrix.target, 'x86_64-apple-') || startsWith(matrix.target, 'aarch64-apple-')
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+      - if: startsWith(matrix.target, 'x86_64-apple-') || startsWith(matrix.target, 'aarch64-apple-')
+        uses: taiki-e/install-action@cargo-zigbuild
+      - if: matrix.target == 'x86_64-pc-windows-msvc'
+        uses: taiki-e/install-action@cargo-xwin
+      - if: matrix.target == 'x86_64-pc-windows-msvc'
+        name: Require Windows cross-linker
+        run: command -v clang
+      - name: Build target
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          USE_CROSS: ${{ matrix.cross }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "$USE_CROSS" == true ]]; then
+            cross build --locked --release --target "$TARGET" --bin mpaka
+          elif [[ "$TARGET" == *apple-darwin ]]; then
+            MACOSX_DEPLOYMENT_TARGET=13.0 cargo zigbuild --locked --release --target "$TARGET" --bin mpaka
+          elif [[ "$TARGET" == *windows-msvc ]]; then
+            cargo xwin build --locked --release --target "$TARGET" --bin mpaka
+          else
+            echo "unsupported cross target: $TARGET" >&2
+            exit 1
+          fi
+      - name: Run target smoke test
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          USE_CROSS: ${{ matrix.cross }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "$USE_CROSS" == true ]]; then
+            output="$(cross run --locked --release --target "$TARGET" --bin mpaka 2>&1 || true)"
+            printf '%s\n' "$output"
+            grep -Fq 'mPaka CLI' <<<"$output"
+          elif [[ "$TARGET" == *windows* ]]; then
+            file "target/$TARGET/release/mpaka.exe" | grep -Fq 'PE32+'
+          elif [[ "$TARGET" == *apple-darwin ]]; then
+            file "target/$TARGET/release/mpaka" | grep -Fq 'Mach-O 64-bit'
+          else
+            echo "unsupported smoke target: $TARGET" >&2
+            exit 1
+          fi
+      - name: Stage raw target binary
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "$TARGET" == *windows* ]]; then source="target/$TARGET/release/mpaka.exe"; else source="target/$TARGET/release/mpaka"; fi
+          cp "$source" "$RUNNER_TEMP/mpaka-$TARGET"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-raw-${{ matrix.target }}
+          path: ${{ runner.temp }}/mpaka-${{ matrix.target }}
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    name: Package and publish CLI
+    needs: build
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, rustbox-cli]
+    environment: ${{ github.ref_type == 'tag' && 'release' || 'verify' }}
+    env:
+      CLI_PUBLIC_BASE_URL: https://cli.mpaka.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-raw-*
+          path: raw
+          merge-multiple: true
+      - name: Install release tooling
+        uses: dtolnay/rust-toolchain@stable
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.11
+          dest: ${{ runner.temp }}/mpaka-cli-pnpm-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Generate and verify release
+        shell: bash
+        env:
+          CLI_RELEASE_SIGNING_KEY: ${{ github.ref_type == 'tag' && secrets.MPAKA_CLI_RELEASE_SIGNING_KEY || '' }}
+        run: |
+          set -Eeuo pipefail
+          version='v0.0.0'
+          if [[ "${GITHUB_REF_TYPE:-}" == tag ]]; then version="$GITHUB_REF_NAME"; fi
+          [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          cargo_version="v$(awk -F'"' '/^version = / { print $2; exit }' Cargo.toml)"
+          if [[ "$version" != v0.0.0 && "$version" != "$cargo_version" ]]; then
+            echo "tag $version does not match package version $cargo_version" >&2
+            exit 1
+          fi
+          work="$RUNNER_TEMP/mpaka-cli-release"
+          mkdir -p "$work/input" "$work/artifacts" "$work/release"
+          for target in \
+            x86_64-unknown-linux-musl \
+            armv7-unknown-linux-musleabihf \
+            aarch64-unknown-linux-musl \
+            x86_64-pc-windows-msvc \
+            x86_64-apple-darwin \
+            aarch64-apple-darwin; do
+            cp "raw/mpaka-$target" "$work/input/mpaka-$target"
+          done
+          scripts/cli-release.sh package --version "$version" --input-dir "$work/input" --output-dir "$work/artifacts"
+          if [[ "${GITHUB_REF_TYPE:-}" == tag ]]; then
+            test -n "$CLI_RELEASE_SIGNING_KEY"
+            printf '%s\n' "$CLI_RELEASE_SIGNING_KEY" > "$work/signing-key.pem"
+          else
+            openssl genrsa 2048 2>/dev/null > "$work/signing-key.pem"
+          fi
+          openssl rsa -in "$work/signing-key.pem" -pubout -out "$work/public.pem" 2>/dev/null
+          scripts/cli-release.sh manifest --version "$version" --artifact-dir "$work/artifacts" --output-dir "$work/release" --signing-key "$work/signing-key.pem"
+          rm -f "$work/signing-key.pem"
+          scripts/cli-release.sh verify --version "$version" --release-dir "$work/release" --public-key "$work/public.pem"
+          test -s "$work/release/manifest.json.sig"
+          sha256sum "$work/release/manifest.json" | tee "$work/manifest.sha256"
+          echo "MPAKA_RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "MPAKA_RELEASE_DIR=$work/release" >> "$GITHUB_ENV"
+          echo "MPAKA_RELEASE_MANIFEST_SHA256=$(awk '{print $1}' "$work/manifest.sha256")" >> "$GITHUB_ENV"
+      - name: Prepare Worker dependencies
+        working-directory: cli-distribution
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Deploy distribution Worker on production tags
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        working-directory: cli-distribution
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.MPAKA_CLI_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.MPAKA_CLI_CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy
+      - name: Publish immutable release prefix
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.MPAKA_CLI_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.MPAKA_CLI_CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -Eeuo pipefail
+          release="$MPAKA_RELEASE_DIR"
+          prefix="releases/$MPAKA_RELEASE_VERSION"
+          existing="$RUNNER_TEMP/existing-manifest.json"
+          if curl --silent --show-error --fail --proto '=https' --proto-redir '=https' "$CLI_PUBLIC_BASE_URL/$prefix/manifest.json" --output "$existing"; then
+            cmp --silent "$release/manifest.json" "$existing" || { echo "immutable release already exists with different manifest" >&2; exit 1; }
+          else
+            for file in "$release"/*; do
+              name="$(basename "$file")"
+              pnpm --dir cli-distribution exec wrangler r2 object put "mpaka-cli-releases/$prefix/$name" --file "$file" --remote --content-type "application/octet-stream"
+            done
+          fi
+          for installer in install install.ps1; do
+            pnpm --dir cli-distribution exec wrangler r2 object put "mpaka-cli-releases/$installer" --file "$GITHUB_WORKSPACE/$installer" --remote --content-type "text/plain; charset=utf-8"
+          done
+      - name: Verify public release before latest pointer
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          release="$MPAKA_RELEASE_DIR"
+          for file in "$release"/*; do
+            name="$(basename "$file")"
+            curl --silent --show-error --fail --proto '=https' --proto-redir '=https' "$CLI_PUBLIC_BASE_URL/releases/$MPAKA_RELEASE_VERSION/$name" --output "$RUNNER_TEMP/public-$name"
+            cmp --silent "$file" "$RUNNER_TEMP/public-$name"
+          done
+      - name: Update latest pointer after public verification
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.MPAKA_CLI_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.MPAKA_CLI_CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -Eeuo pipefail
+          printf '%s\n' "$MPAKA_RELEASE_VERSION" > "$RUNNER_TEMP/latest"
+          pnpm --dir cli-distribution exec wrangler r2 object put "mpaka-cli-releases/latest" --file "$RUNNER_TEMP/latest" --remote --content-type "text/plain; charset=utf-8"
+          test "$(curl --silent --show-error --fail --proto '=https' --proto-redir '=https' "$CLI_PUBLIC_BASE_URL/latest" | tr -d '\r\n')" = "$MPAKA_RELEASE_VERSION"
+          {
+            echo "### mPaka CLI release"
+            echo "- version: $MPAKA_RELEASE_VERSION"
+            echo "- manifest SHA-256: $MPAKA_RELEASE_MANIFEST_SHA256"
+          } >> "$GITHUB_STEP_SUMMARY"
