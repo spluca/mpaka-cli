@@ -42,8 +42,18 @@ while IFS=$'\t' read -r filename expected_hash; do
 done < <(jq -r '.artifacts[] | [.filename, .sha256] | @tsv' "$work/manifest.json")
 
 landing_base="${MPAKA_LANDING_BASE_URL:-https://mpaka.dev}"
-landing_status="$(curl --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 0 --dump-header "$work/landing.headers" --output /dev/null --write-out '%{http_code}' "$landing_base/")" || true
-[[ "$landing_status" =~ ^3[0-9][0-9]$ ]] || { echo "landing root is not Access-protected; got $landing_status" >&2; exit 1; }
-grep -Eqi 'cloudflareaccess|/cdn-cgi/access|login' "$work/landing.headers" || { echo 'landing redirect is not an Access redirect' >&2; exit 1; }
+landing_status="$(curl --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 0 --dump-header "$work/landing.headers" --output "$work/landing.html" --write-out '%{http_code}' "$landing_base/")" || true
+[[ "$landing_status" == 200 ]] || { echo "landing root is not public; got $landing_status" >&2; exit 1; }
+grep -Eqi '^content-type:.*text/html' "$work/landing.headers" || { echo 'landing root did not return HTML' >&2; exit 1; }
+grep -Eqi '<!doctype html|<html' "$work/landing.html" || { echo 'landing root response is not an HTML document' >&2; exit 1; }
+
+app_base="${MPAKA_APP_BASE_URL:-https://app.mpaka.dev}"
+app_status="$(curl --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 0 --dump-header "$work/app.headers" --output /dev/null --write-out '%{http_code}' "$app_base/")" || true
+[[ "$app_status" =~ ^3[0-9][0-9]$ ]] || { echo "app root is not Access-protected; got $app_status" >&2; exit 1; }
+grep -Eqi 'cloudflareaccess|/cdn-cgi/access|login' "$work/app.headers" || { echo 'app redirect is not a Cloudflare Access redirect' >&2; exit 1; }
+
+api_base="${MPAKA_API_BASE_URL:-https://api.mpaka.dev}"
+api_status="$(curl --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 0 --dump-header "$work/api-health.headers" --output "$work/api-health.json" --write-out '%{http_code}' "$api_base/health")" || true
+[[ "$api_status" == 200 ]] || { echo "API health is unavailable; got $api_status" >&2; exit 1; }
 
 printf 'mPaka CLI public acceptance passed for %s (manifest %s)\n' "$version" "$(sha256sum "$work/manifest.json" | awk '{print $1}')"
