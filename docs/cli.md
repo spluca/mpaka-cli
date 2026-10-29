@@ -69,17 +69,10 @@ The workspace includes a Rust CLI named `mpaka`. Account commands use the web
 session boundary; execution commands use an execution API key. The web console
 does not accept source code for execution.
 
-## Build and configuration
+## Configuration
 
-From the repository root:
-
-```bash
-cargo build --release --bin mpaka
-```
-
-The CLI uses the canonical mPaka API,
-`https://api.mpaka.dev`, by default. Set `MPAKA_API_URL` or pass `--endpoint`
-to use another API endpoint, such as the local API at `http://127.0.0.1:5300`.
+The CLI uses the mPaka API at `https://api.mpaka.dev` by default. Set
+`MPAKA_API_URL` or pass `--endpoint` to use another API endpoint.
 
 The opaque web session is stored at `~/.config/mpaka/session`. Set
 `RUSTBOX_SESSION_FILE` to choose another path. The file is created with
