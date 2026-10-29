@@ -12,7 +12,7 @@ The CLI never runs submitted code locally: it only talks to the mPaka API.
 Linux and macOS:
 
 ```bash
-curl -fsSL https://cli.mpaka.dev/install | sh
+curl -fsSL https://cli.mpaka.dev/install | bash
 ```
 
 Windows PowerShell:

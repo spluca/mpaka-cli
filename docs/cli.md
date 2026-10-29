@@ -8,14 +8,14 @@ It does not require Rust or administrator privileges.
 On Linux and macOS:
 
 ```bash
-curl -fsSL https://cli.mpaka.dev/install | sh
+curl -fsSL https://cli.mpaka.dev/install | bash
 mpaka --version
 ```
 
 To install an exact immutable release, pass its version to the installer:
 
 ```bash
-curl -fsSL https://cli.mpaka.dev/install | sh -s -- --version v0.1.0
+curl -fsSL https://cli.mpaka.dev/install | bash -s -- --version v0.1.0
 ```
 
 On Windows PowerShell:
@@ -30,7 +30,7 @@ and the SHA-256 hash of the selected archive, reject unexpected archive
 entries, and install to a user-owned directory. Unix installs use
 `~/.local/bin`; Windows installs use `%LOCALAPPDATA%\mPaka\bin`.
 
-The `curl | sh` form necessarily trusts the installer script delivered over
+The `curl | bash` form necessarily trusts the installer script delivered over
 HTTPS. The embedded public key protects release metadata and binary archives,
 not the initial script itself. For a higher-assurance installation, download
 `install` or `install.ps1`, inspect it, and run it locally. The embedded key is
