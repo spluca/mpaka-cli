@@ -21,8 +21,13 @@ grep -Fq 'cross build' "$workflow"
 grep -Fq "grep -Fq 'mPaka CLI'" "$workflow"
 grep -Fq "environment: \${{ github.ref_type == 'tag' && 'release' || 'verify' }}" "$workflow"
 grep -Fq "secrets.MPAKA_CLI_RELEASE_SIGNING_KEY || ''" "$workflow"
-if grep -Eq 'ubuntu-latest|windows-latest|macos-' "$workflow"; then
-  printf 'CLI release workflow must not use GitHub-hosted runners\n' >&2
+grep -Fq 'powershell-installer:' "$workflow"
+grep -Fq 'runs-on: windows-2025' "$workflow"
+grep -Fq 'pwsh -NoProfile -File scripts/installer-test.ps1' "$workflow"
+grep -Fq 'needs: [build, powershell-installer]' "$workflow"
+unpinned_actions="$(grep -E '^[[:space:]]+(-[[:space:]]+)?uses:' "$workflow" | grep -Ev 'uses:[[:space:]]+[^[:space:]]+@[0-9a-f]{40}([[:space:]]+#[[:space:]].+)?$' || true)"
+if [[ -n "$unpinned_actions" ]]; then
+  printf 'every third-party Action must be pinned to a commit SHA:\n%s\n' "$unpinned_actions" >&2
   exit 1
 fi
 # This repository is public: self-hosted jobs must never run fork pull requests.

@@ -26,10 +26,13 @@ existing Access login, and `https://api.mpaka.dev/health` returns 200. Run
 
 ## GitHub configuration
 
-The release workflow runs entirely on a dedicated self-hosted Linux runner
-labelled `rustbox-cli`. Linux targets use `cross`, the Windows MSVC target uses
-`cargo-xwin` and Clang, and macOS targets use `cargo-zigbuild` with the pinned
-Zig setup action. Foreign binaries are validated with `file`.
+The release build and publication pipeline runs on a dedicated self-hosted
+Linux runner labelled `rustbox-cli`. Linux targets use `cross`, the Windows
+MSVC target uses `cargo-xwin` and Clang, and macOS targets use
+`cargo-zigbuild` with the pinned Zig setup action. Foreign binaries are
+validated with `file`. A separate GitHub-hosted Windows job executes the
+PowerShell installer fixture tests with real PowerShell; it does not receive
+release secrets or publish artifacts.
 
 Because this repository is public, every self-hosted job skips pull requests
 whose head branch lives in a fork, and

@@ -21,16 +21,16 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, X64, rustbox-cli]
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: rustfmt, clippy
-      - uses: taiki-e/install-action@nextest
-      - uses: pnpm/action-setup@v4
+      - uses: taiki-e/install-action@d042af60014eb018fcd01f57f4f62118b69e3ea6 # nextest
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 12.11
           dest: ${{ runner.temp }}/mpaka-cli-contract-pnpm-${{ github.run_id }}-${{ github.run_attempt }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
       - name: Check Rust contract
@@ -51,6 +51,15 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm test
           pnpm exec wrangler deploy --dry-run
+
+  powershell-installer:
+    name: PowerShell installer fixtures
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Test PowerShell installer
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/installer-test.ps1
 
   build:
     name: Build ${{ matrix.target }}
@@ -74,20 +83,20 @@ jobs:
             cross: false
     runs-on: [self-hosted, Linux, X64, rustbox-cli]
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: ${{ matrix.target }}
       - if: matrix.cross
-        uses: taiki-e/install-action@cross
+        uses: taiki-e/install-action@922dad5852efa077247f59a8250e1c9ab6cf2ba3 # cross
       - if: startsWith(matrix.target, 'x86_64-apple-') || startsWith(matrix.target, 'aarch64-apple-')
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
       - if: startsWith(matrix.target, 'x86_64-apple-') || startsWith(matrix.target, 'aarch64-apple-')
-        uses: taiki-e/install-action@cargo-zigbuild
+        uses: taiki-e/install-action@00d988ebd92aeaa37e13cf8a35767d8d1cc1734a # cargo-zigbuild
       - if: matrix.target == 'x86_64-pc-windows-msvc'
-        uses: taiki-e/install-action@cargo-xwin
+        uses: taiki-e/install-action@8a2994f8518496d403cec463b83bfe763c03de77 # cargo-xwin
       - if: matrix.target == 'x86_64-pc-windows-msvc'
         name: Require Windows cross-linker
         run: command -v clang
@@ -135,7 +144,7 @@ jobs:
           set -Eeuo pipefail
           if [[ "$TARGET" == *windows* ]]; then source="target/$TARGET/release/mpaka.exe"; else source="target/$TARGET/release/mpaka"; fi
           cp "$source" "$RUNNER_TEMP/mpaka-$TARGET"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cli-raw-${{ matrix.target }}
           path: ${{ runner.temp }}/mpaka-${{ matrix.target }}
@@ -144,28 +153,28 @@ jobs:
 
   package:
     name: Package and publish CLI
-    needs: build
+    needs: [build, powershell-installer]
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, X64, rustbox-cli]
     environment: ${{ github.ref_type == 'tag' && 'release' || 'verify' }}
     env:
       CLI_PUBLIC_BASE_URL: https://cli.mpaka.dev
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: cli-raw-*
           path: raw
           merge-multiple: true
       - name: Install release tooling
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 12.11
           dest: ${{ runner.temp }}/mpaka-cli-pnpm-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
       - name: Generate and verify release
