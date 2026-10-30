@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR
+source "$script_dir/cli-public-acceptance-lib.sh"
+
 base_url="${MPAKA_CLI_PUBLIC_BASE_URL:-https://cli.mpaka.dev}"
 public_key="${MPAKA_CLI_PUBLIC_KEY_FILE:-}"
 [[ "$base_url" == https://* ]] || { echo 'MPAKA_CLI_PUBLIC_BASE_URL must use HTTPS' >&2; exit 1; }
@@ -49,8 +53,8 @@ grep -Eqi '<!doctype html|<html' "$work/landing.html" || { echo 'landing root re
 
 app_base="${MPAKA_APP_BASE_URL:-https://app.mpaka.dev}"
 app_status="$(curl --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 0 --dump-header "$work/app.headers" --output /dev/null --write-out '%{http_code}' "$app_base/")" || true
-[[ "$app_status" =~ ^3[0-9][0-9]$ ]] || { echo "app root is not Access-protected; got $app_status" >&2; exit 1; }
-grep -Eqi 'cloudflareaccess|/cdn-cgi/access|login' "$work/app.headers" || { echo 'app redirect is not a Cloudflare Access redirect' >&2; exit 1; }
+access_host="${MPAKA_ACCESS_HOST:-spluca.cloudflareaccess.com}"
+require_cloudflare_access_redirect "$app_status" "$work/app.headers" "$access_host"
 
 api_base="${MPAKA_API_BASE_URL:-https://api.mpaka.dev}"
 api_status="$(curl --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 0 --dump-header "$work/api-health.headers" --output "$work/api-health.json" --write-out '%{http_code}' "$api_base/health")" || true
