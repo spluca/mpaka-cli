@@ -10,25 +10,29 @@ Create the R2 bucket `mpaka-cli-releases` and deploy the Worker in
 `cli.mpaka.dev/*`. It must be deployed separately from the Astro landing
 Worker so release history does not grow the landing asset bundle.
 
-The existing Cloudflare Access application continues to protect
-`mpaka.dev/*`. Add a public Access application for exactly:
+The landing at `mpaka.dev/*` is public. Keep the existing Cloudflare Access
+application protecting `app.mpaka.dev/*`, and add a public Access application
+for exactly:
 
 ```text
 cli.mpaka.dev/*
 ```
 
 The CLI application may use Bypass for public downloads, but it must not cover
-the landing domain, the dashboard, or the API. Verify anonymously that
-`/install` and `/latest` return 2xx and that `https://mpaka.dev/` still redirects
-to the existing Access login. Run `scripts/cli-public-acceptance.sh` after every
-Access or Worker change.
+the console or the API. Verify anonymously that the CLI downloads and
+`https://mpaka.dev/` return 200, `https://app.mpaka.dev/` redirects to the
+existing Access login, and `https://api.mpaka.dev/health` returns 200. Run
+`scripts/cli-public-acceptance.sh` after every Access or Worker change.
 
 ## GitHub configuration
 
-The release workflow runs entirely on a dedicated self-hosted Linux runner
-labelled `rustbox-cli`. Linux targets use `cross`, the Windows MSVC target uses
-`cargo-xwin` and Clang, and macOS targets use `cargo-zigbuild` with the pinned
-Zig setup action. Foreign binaries are validated with `file`.
+The release build and publication pipeline runs on a dedicated self-hosted
+Linux runner labelled `rustbox-cli`. Linux targets use `cross`, the Windows
+MSVC target uses `cargo-xwin` and Clang, and macOS targets use
+`cargo-zigbuild` with the pinned Zig setup action. Foreign binaries are
+validated with `file`. A separate GitHub-hosted Windows job executes the
+PowerShell installer fixture tests with real PowerShell; it does not receive
+release secrets or publish artifacts.
 
 Because this repository is public, every self-hosted job skips pull requests
 whose head branch lives in a fork, and

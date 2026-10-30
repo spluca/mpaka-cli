@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR
+source "$script_dir/cli-public-acceptance-lib.sh"
+
 base_url="${MPAKA_CLI_PUBLIC_BASE_URL:-https://cli.mpaka.dev}"
 public_key="${MPAKA_CLI_PUBLIC_KEY_FILE:-}"
 [[ "$base_url" == https://* ]] || { echo 'MPAKA_CLI_PUBLIC_BASE_URL must use HTTPS' >&2; exit 1; }
@@ -42,8 +46,18 @@ while IFS=$'\t' read -r filename expected_hash; do
 done < <(jq -r '.artifacts[] | [.filename, .sha256] | @tsv' "$work/manifest.json")
 
 landing_base="${MPAKA_LANDING_BASE_URL:-https://mpaka.dev}"
-landing_status="$(curl --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 0 --dump-header "$work/landing.headers" --output /dev/null --write-out '%{http_code}' "$landing_base/")" || true
-[[ "$landing_status" =~ ^3[0-9][0-9]$ ]] || { echo "landing root is not Access-protected; got $landing_status" >&2; exit 1; }
-grep -Eqi 'cloudflareaccess|/cdn-cgi/access|login' "$work/landing.headers" || { echo 'landing redirect is not an Access redirect' >&2; exit 1; }
+landing_status="$(curl --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 0 --dump-header "$work/landing.headers" --output "$work/landing.html" --write-out '%{http_code}' "$landing_base/")" || true
+[[ "$landing_status" == 200 ]] || { echo "landing root is not public; got $landing_status" >&2; exit 1; }
+grep -Eqi '^content-type:.*text/html' "$work/landing.headers" || { echo 'landing root did not return HTML' >&2; exit 1; }
+grep -Eqi '<!doctype html|<html' "$work/landing.html" || { echo 'landing root response is not an HTML document' >&2; exit 1; }
+
+app_base="${MPAKA_APP_BASE_URL:-https://app.mpaka.dev}"
+app_status="$(curl --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 0 --dump-header "$work/app.headers" --output /dev/null --write-out '%{http_code}' "$app_base/")" || true
+access_host="${MPAKA_ACCESS_HOST:-spluca.cloudflareaccess.com}"
+require_cloudflare_access_redirect "$app_status" "$work/app.headers" "$access_host"
+
+api_base="${MPAKA_API_BASE_URL:-https://api.mpaka.dev}"
+api_status="$(curl --silent --show-error --proto '=https' --proto-redir '=https' --max-redirs 0 --dump-header "$work/api-health.headers" --output "$work/api-health.json" --write-out '%{http_code}' "$api_base/health")" || true
+[[ "$api_status" == 200 ]] || { echo "API health is unavailable; got $api_status" >&2; exit 1; }
 
 printf 'mPaka CLI public acceptance passed for %s (manifest %s)\n' "$version" "$(sha256sum "$work/manifest.json" | awk '{print $1}')"
