@@ -74,6 +74,11 @@ primary_home="$work/primary-home"
 HOME="$primary_home" MPAKA_CLI_BASE_URL="$base_url" MPAKA_CLI_CA_CERT="$cert" MPAKA_CLI_TEST_PUBLIC_KEY_PEM="$primary_pem" MPAKA_CLI_TEST_FALLBACK_PUBLIC_KEY_PEM="$fallback_pem" "$root/install" >/dev/null
 test -x "$primary_home/.local/bin/mpaka"
 
+if HOME="$work/malformed-key-home" MPAKA_CLI_BASE_URL="$base_url" MPAKA_CLI_CA_CERT="$cert" MPAKA_CLI_TEST_PUBLIC_KEY_PEM="$primary_pem" MPAKA_CLI_TEST_FALLBACK_PUBLIC_KEY_PEM='not a public key' "$root/install" >/dev/null 2>&1; then
+  printf 'installer accepted a malformed fallback public key\n' >&2
+  exit 1
+fi
+
 if MPAKA_CLI_BASE_URL='http://127.0.0.1:1/cli' "$root/install" >/dev/null 2>&1; then
   printf 'installer accepted a non-HTTPS base URL\n' >&2
   exit 1
