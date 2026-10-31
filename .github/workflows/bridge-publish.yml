@@ -1,0 +1,172 @@
+name: Publish mPaka CLI v0.2.0 bridge
+
+on:
+  workflow_dispatch:
+    inputs:
+      prepare_run_id:
+        description: Successful release workflow run that prepared the exact bundle
+        required: true
+        type: string
+      expected_commit:
+        description: Forty-character commit SHA recorded inside the prepared bundle
+        required: true
+        type: string
+      manifest_sha256:
+        description: Lowercase SHA-256 of the canonical v0.2.0 manifest
+        required: true
+        type: string
+      manifest_signature_base64:
+        description: Old-key detached manifest signature encoded as one base64 line
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: mpaka-cli-v0.2.0-bridge-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify and publish exact bridge bundle
+    if: github.actor == github.repository_owner
+    runs-on: [self-hosted, Linux, X64, rustbox-cli]
+    environment: release
+    env:
+      CLI_PUBLIC_BASE_URL: https://cli.mpaka.dev
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.expected_commit }}
+      - name: Download exact prepared bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mpaka-cli-v0.2.0-prepared
+          path: ${{ runner.temp }}/mpaka-cli-v0.2.0-prepared
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.prepare_run_id }}
+      - name: Validate bundle identity and attach old-key signature
+        shell: bash
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+          MANIFEST_SIGNATURE_BASE64: ${{ inputs.manifest_signature_base64 }}
+        run: |
+          set -Eeuo pipefail
+          bundle="$RUNNER_TEMP/mpaka-cli-v0.2.0-prepared"
+          [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          test "$(tr -d '\r\n' < "$bundle/source-commit")" = "$EXPECTED_COMMIT"
+          test "$(tr -d '\r\n' < "$bundle/manifest.sha256")" = "$MANIFEST_SHA256"
+          test "$(sha256sum "$bundle/manifest.json" | awk '{print $1}')" = "$MANIFEST_SHA256"
+          test "$(jq -r '.version' "$bundle/manifest.json")" = v0.2.0
+          test "$(jq '.artifacts | length' "$bundle/manifest.json")" -eq 6
+          test -z "$(find "$bundle" -maxdepth 1 -type f \( -name '*.pem' -o -name '*.sig' \) -print -quit)"
+          {
+            printf '%s\n' install install.ps1 manifest.json manifest.sha256 source-commit
+            jq -r '.artifacts[].filename' "$bundle/manifest.json"
+          } | sort > "$RUNNER_TEMP/expected-bundle-files"
+          find "$bundle" -maxdepth 1 -type f -printf '%f\n' | sort > "$RUNNER_TEMP/actual-bundle-files"
+          diff -u "$RUNNER_TEMP/expected-bundle-files" "$RUNNER_TEMP/actual-bundle-files"
+          printf '%s' "$MANIFEST_SIGNATURE_BASE64" | base64 --decode > "$bundle/manifest.json.sig"
+          test "$(wc -c < "$bundle/manifest.json.sig" | tr -d '[:space:]')" -eq 384
+          cat > "$RUNNER_TEMP/old-release-public.pem" <<'PEM'
+          -----BEGIN PUBLIC KEY-----
+          MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAj4+ezaZgsT5NlaDScaKn
+          oxXg+CjSmYQLRxe6zHFZTkAj668hHFlgWX7zrYlxLy9qSb29uj4JyBLyCISZOdye
+          FumDXOZOiVwVl2HDINiaWAAHzRSC7Jm21MZ5DYR6fV2gm50Rm+r8DO72OhlQqH/T
+          R5UKnUN8YxnlJZoVb73PqxFnwpYN7E0Cuc8D0VI47Vor06gdvTTaXCY+L7+UlT/H
+          kcd2UeMkBQcYtusdqvBn1hVeIg3UYQL2QoaN5DNTHtGg5Xoj3FtaJt5QFWqO/hUs
+          DAb3IvFxwWkik9kbLpMhuN5RQlMHOXmZPDIkl49thFw6FHgCYPUiUYC+XBOkOzTv
+          KzvrwcFabuosV7Sw/Mg1F8hSsdrfnWSphXPvHukrm7SPAQy1Fm80r+YpplwIWJ7s
+          59mlh3lfJbzwa6Mej92TmXh35EiV3ImOBdTx8Y7LIdHS2m6YmxxZYiDgDIc//027
+          /Vrt9RLw5cYgJKvFWhmvPLAX44naMd+fNQENa8e+DP6tAgMBAAE=
+          -----END PUBLIC KEY-----
+          PEM
+          test "$(openssl pkey -pubin -in "$RUNNER_TEMP/old-release-public.pem" -outform DER 2>/dev/null | sha256sum | awk '{print $1}')" = fec4af38209410541558e098f79a11eb3a405512ea30a0f8b7106735623296e0
+          openssl dgst -sha256 -verify "$RUNNER_TEMP/old-release-public.pem" -signature "$bundle/manifest.json.sig" "$bundle/manifest.json" >/dev/null
+          scripts/cli-release.sh verify --version v0.2.0 --release-dir "$bundle" --public-key "$RUNNER_TEMP/old-release-public.pem"
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 12.11
+          dest: ${{ runner.temp }}/mpaka-cli-bridge-pnpm-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Install Worker dependencies
+        working-directory: cli-distribution
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Deploy bridge-aware distribution Worker
+        working-directory: cli-distribution
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.MPAKA_CLI_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.MPAKA_CLI_CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy
+      - name: Publish immutable v0.2.0 release and installers
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.MPAKA_CLI_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.MPAKA_CLI_CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -Eeuo pipefail
+          bundle="$RUNNER_TEMP/mpaka-cli-v0.2.0-prepared"
+          prefix='releases/v0.2.0'
+          existing="$RUNNER_TEMP/existing-v0.2.0-manifest.json"
+          if curl --silent --show-error --fail --proto '=https' --proto-redir '=https' "$CLI_PUBLIC_BASE_URL/$prefix/manifest.json" --output "$existing"; then
+            cmp --silent "$bundle/manifest.json" "$existing" || { echo 'immutable bridge release already exists with a different manifest' >&2; exit 1; }
+          else
+            for name in manifest.json manifest.json.sig; do
+              pnpm --dir cli-distribution exec wrangler r2 object put "mpaka-cli-releases/$prefix/$name" --file "$bundle/$name" --remote --content-type application/octet-stream
+            done
+            while IFS= read -r name; do
+              pnpm --dir cli-distribution exec wrangler r2 object put "mpaka-cli-releases/$prefix/$name" --file "$bundle/$name" --remote --content-type application/octet-stream
+            done < <(jq -r '.artifacts[].filename' "$bundle/manifest.json")
+          fi
+          for installer in install install.ps1; do
+            pnpm --dir cli-distribution exec wrangler r2 object put "mpaka-cli-releases/$installer" --file "$bundle/$installer" --remote --content-type "text/plain; charset=utf-8"
+          done
+      - name: Compare every public bridge object byte-for-byte
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bundle="$RUNNER_TEMP/mpaka-cli-v0.2.0-prepared"
+          {
+            printf '%s\n' manifest.json manifest.json.sig
+            jq -r '.artifacts[].filename' "$bundle/manifest.json"
+          } > "$RUNNER_TEMP/release-files"
+          while IFS= read -r name; do
+            file="$bundle/$name"
+            curl --silent --show-error --fail --proto '=https' --proto-redir '=https' "$CLI_PUBLIC_BASE_URL/releases/v0.2.0/$name" --output "$RUNNER_TEMP/public-$name"
+            cmp --silent "$file" "$RUNNER_TEMP/public-$name"
+          done < "$RUNNER_TEMP/release-files"
+          for installer in install install.ps1; do
+            file="$bundle/$installer"
+            curl --silent --show-error --fail --proto '=https' --proto-redir '=https' "$CLI_PUBLIC_BASE_URL/$installer" --output "$RUNNER_TEMP/public-$installer"
+            cmp --silent "$file" "$RUNNER_TEMP/public-$installer"
+          done
+      - name: Write compatibility and active pointers last
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.MPAKA_CLI_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.MPAKA_CLI_CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -Eeuo pipefail
+          printf 'v0.2.0\n' > "$RUNNER_TEMP/v0.2.0-pointer"
+          pnpm --dir cli-distribution exec wrangler r2 object put "mpaka-cli-releases/latest" --file "$RUNNER_TEMP/v0.2.0-pointer" --remote --content-type "text/plain; charset=utf-8"
+          pnpm --dir cli-distribution exec wrangler r2 object put "mpaka-cli-releases/latest-v2" --file "$RUNNER_TEMP/v0.2.0-pointer" --remote --content-type "text/plain; charset=utf-8"
+          test "$(curl --silent --show-error --fail --proto '=https' --proto-redir '=https' "$CLI_PUBLIC_BASE_URL/latest" | tr -d '\r\n')" = v0.2.0
+          test "$(curl --silent --show-error --fail --proto '=https' --proto-redir '=https' "$CLI_PUBLIC_BASE_URL/latest-v2" | tr -d '\r\n')" = v0.2.0
+          {
+            echo '### mPaka CLI v0.2.0 compatibility bridge'
+            echo "- source commit: ${{ inputs.expected_commit }}"
+            echo "- preparation run: ${{ inputs.prepare_run_id }}"
+            echo "- manifest SHA-256: ${{ inputs.manifest_sha256 }}"
+          } >> "$GITHUB_STEP_SUMMARY"

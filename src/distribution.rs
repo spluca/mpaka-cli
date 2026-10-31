@@ -7,10 +7,10 @@ use std::{fmt, str::FromStr};
 
 pub const RELEASE_BASE_URL: &str = "https://cli.mpaka.dev";
 
-// The private half is generated outside the repository and stored only in the
-// protected release environment. This public half is intentionally embedded in
-// the client and installers so release metadata cannot silently change key.
-pub const EMBEDDED_PUBLIC_KEY_PEM: &str = "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAj4+ezaZgsT5NlaDScaKn\noxXg+CjSmYQLRxe6zHFZTkAj668hHFlgWX7zrYlxLy9qSb29uj4JyBLyCISZOdye\nFumDXOZOiVwVl2HDINiaWAAHzRSC7Jm21MZ5DYR6fV2gm50Rm+r8DO72OhlQqH/T\nR5UKnUN8YxnlJZoVb73PqxFnwpYN7E0Cuc8D0VI47Vor06gdvTTaXCY+L7+UlT/H\nkcd2UeMkBQcYtusdqvBn1hVeIg3UYQL2QoaN5DNTHtGg5Xoj3FtaJt5QFWqO/hUs\nDAb3IvFxwWkik9kbLpMhuN5RQlMHOXmZPDIkl49thFw6FHgCYPUiUYC+XBOkOzTv\nKzvrwcFabuosV7Sw/Mg1F8hSsdrfnWSphXPvHukrm7SPAQy1Fm80r+YpplwIWJ7s\n59mlh3lfJbzwa6Mej92TmXh35EiV3ImOBdTx8Y7LIdHS2m6YmxxZYiDgDIc//027\n/Vrt9RLw5cYgJKvFWhmvPLAX44naMd+fNQENa8e+DP6tAgMBAAE=\n-----END PUBLIC KEY-----\n";
+// v0.2.0 is a bridge: its manifest is signed by the old key so v0.1.0 can
+// install it, while the bridge itself accepts the new key for the final cutover.
+pub const OLD_RELEASE_PUBLIC_KEY_PEM: &str = "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAj4+ezaZgsT5NlaDScaKn\noxXg+CjSmYQLRxe6zHFZTkAj668hHFlgWX7zrYlxLy9qSb29uj4JyBLyCISZOdye\nFumDXOZOiVwVl2HDINiaWAAHzRSC7Jm21MZ5DYR6fV2gm50Rm+r8DO72OhlQqH/T\nR5UKnUN8YxnlJZoVb73PqxFnwpYN7E0Cuc8D0VI47Vor06gdvTTaXCY+L7+UlT/H\nkcd2UeMkBQcYtusdqvBn1hVeIg3UYQL2QoaN5DNTHtGg5Xoj3FtaJt5QFWqO/hUs\nDAb3IvFxwWkik9kbLpMhuN5RQlMHOXmZPDIkl49thFw6FHgCYPUiUYC+XBOkOzTv\nKzvrwcFabuosV7Sw/Mg1F8hSsdrfnWSphXPvHukrm7SPAQy1Fm80r+YpplwIWJ7s\n59mlh3lfJbzwa6Mej92TmXh35EiV3ImOBdTx8Y7LIdHS2m6YmxxZYiDgDIc//027\n/Vrt9RLw5cYgJKvFWhmvPLAX44naMd+fNQENa8e+DP6tAgMBAAE=\n-----END PUBLIC KEY-----\n";
+pub const NEW_RELEASE_PUBLIC_KEY_PEM: &str = "-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAnyBHAJkNHa0jLqrilDuO\n8V5m3kgqEKuNg87kGYui6oleXj0wcxTtH7lsskSSIoTGw/rbvYmYthB7LCM6K0Fl\nJyPAawnP6SEYd0vXfU8PPpuQpgmnSKrVOtt1Xn/d/5eeu5Izgfx9qyamozyAhtKo\n6+63qgG/55KeyYJxul8uRqffedXxISg1gWCsDVigBzEJjERCks9wD0CfLCjUKdat\n8ZHL+iQZ6mdFHUmT66jLu8gEpACq+all/cvrg8SCFeQUA7Fm1XXaMvj6+gq/heLW\nFYEfcI1OBuERG3/3aZI8v1t2QGomKN0DYKM7846w4bdnEA0SXC9vpD7FPl8OYJNh\n86/W06DZ7L0X7Zh2EzCrTYT2zWcwB0zjxe7sDheTXv+qrHZKACOhoVKwMLdf1/EO\nwaPDsx9fY9QwUnZGhCpLiCFTa78l07GNchYuVlWF1ZsKgfuzMkSBhAASN+rJzMS0\nUovDuDrszsk6LdOR4mh1q+f7Bo0p0YOUfc7Erj2AEUSzAgMBAAE=\n-----END PUBLIC KEY-----\n";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ReleaseTarget {
@@ -172,22 +172,41 @@ pub fn verify_manifest_signature(
     manifest_bytes: &[u8],
     signature_bytes: &[u8],
 ) -> Result<(), DistributionError> {
-    verify_manifest_signature_with_key(manifest_bytes, signature_bytes, EMBEDDED_PUBLIC_KEY_PEM)
+    verify_manifest_signature_with_keys(
+        manifest_bytes,
+        signature_bytes,
+        &[OLD_RELEASE_PUBLIC_KEY_PEM, NEW_RELEASE_PUBLIC_KEY_PEM],
+    )
 }
 
+#[cfg(test)]
 fn verify_manifest_signature_with_key(
     manifest_bytes: &[u8],
     signature_bytes: &[u8],
     public_key_pem: &str,
 ) -> Result<(), DistributionError> {
-    let public_key = RsaPublicKey::from_public_key_pem(public_key_pem)
-        .map_err(|_| DistributionError::InvalidPublicKey)?;
-    let verifying_key = VerifyingKey::<Sha256>::new(public_key);
+    verify_manifest_signature_with_keys(manifest_bytes, signature_bytes, &[public_key_pem])
+}
+
+fn verify_manifest_signature_with_keys(
+    manifest_bytes: &[u8],
+    signature_bytes: &[u8],
+    public_key_pems: &[&str],
+) -> Result<(), DistributionError> {
     let signature = rsa::pkcs1v15::Signature::try_from(signature_bytes)
         .map_err(|_| DistributionError::InvalidSignature)?;
-    verifying_key
-        .verify(manifest_bytes, &signature)
-        .map_err(|_| DistributionError::InvalidSignature)
+    let mut verified = false;
+    for public_key_pem in public_key_pems {
+        let public_key = RsaPublicKey::from_public_key_pem(public_key_pem)
+            .map_err(|_| DistributionError::InvalidPublicKey)?;
+        let verifying_key = VerifyingKey::<Sha256>::new(public_key);
+        verified |= verifying_key.verify(manifest_bytes, &signature).is_ok();
+    }
+    if verified {
+        Ok(())
+    } else {
+        Err(DistributionError::InvalidSignature)
+    }
 }
 
 pub fn release_artifact_url(version: &str, filename: &str) -> Result<Url, DistributionError> {
@@ -234,6 +253,7 @@ mod tests {
 
     const VALID_MANIFEST: &[u8] = br#"{"version":"v0.1.0"}"#;
     const VALID_SIGNATURE_B64: &str = "FoNzjgC6DqC8V1ciAgGSeDCIxbA8hbq4H6b3xpeLQfG9lJ5FW+tCDzLz7jXwGmRJOz8wP1yWjKTcwB7w/AWw+KjlpoJyre3meyyynzSrIPBnnq8bU8Sum5XH3KbZFBAU66qx5ogvX3/xxF67b4BnMI48q/A+WIIZjeqQUi2ikx5gSSabFK4HPbZleYZ0V2SqrwuIX841QdCt0YwcCNakajCOKCXxAegS6Sf5yY7ofjZ3XA98zW98kkKdX7wgSLpdLZ2ThUwtdxfYGwpX3CNn+yBEs3l2DgpDdqQ/oAKoqAKBB8SBT4jx/dLcodVUqTkL9p5e0o89b4lrMvSTqxRDs/N+QeHMVhcmc8RWGBZMNHBLAKq2+Ol6/BTW5iG5hdEg+cTlZPAJRnK1OrXmR7XyWvbpr3zuYLJLvD1xlN5RaZh2tpjAHecgQjOuH+2j1Ktv1lVqkcbxMvZpmaNgfudLmxP+JgetwMcficmNViakPGUpXlyGB52Ewq9KZGLfV50g";
+    const NEW_SIGNATURE_B64: &str = "G6IZ1TgCpB773u0lB43eYFkVD36D0BytxeOIXULO8LQyffGfofm6Rk6XoILktwU/cDEpoxX9TKR6q/zSHUS8DDXZasdjmuNQO4tV5zb3Hfp60gaCR93DiQdWxhtKZif9IlT/61y7LJMwJuwkBh/vLtV4P3C98XJTtIVE19xNBtASqV0LCRf2uqRG6q+JbYXCGxRUF/5pvkPCYE1amtks2tjEsy8IlcDTvavwYfwVO/R4bgBr7vbbpiuRbYS6NakeMdo39VzMJ/X9j1DSbimNkNy3AMrAJXuEMMW4l/jwCCRPHW0VKelMqEmlTNlWyYUCktuOpnJQjLa9ngKRawqemXtiIEN2wGnZbRPU8gGZM1p8Zt6a8IWQBdZ5RciGNTk+VL8DgehYeP/4fSXbqlR7ZarMF2znXibYXpWczARlnZi0ptu6W14gLj292abtmQJ14+Vp1oRpsyeOOBuBX9Qyem6bkA8GE2ynBMTpR0a/PqUjKuZWJCbB+ukUvQGvyN7R";
 
     #[test]
     fn maps_supported_hosts_to_release_targets() {
@@ -319,13 +339,29 @@ mod tests {
     }
 
     #[test]
-    fn verifies_valid_signature_and_rejects_changed_manifest() {
-        let signature = base64::engine::general_purpose::STANDARD
+    fn accepts_manifests_signed_by_either_bridge_key() {
+        let old_signature = base64::engine::general_purpose::STANDARD
             .decode(VALID_SIGNATURE_B64)
-            .expect("signature base64");
-        assert!(verify_manifest_signature(VALID_MANIFEST, &signature).is_ok());
-        assert!(verify_manifest_signature(b"changed", &signature).is_err());
-        assert!(verify_manifest_signature(VALID_MANIFEST, b"invalid").is_err());
+            .expect("old signature base64");
+        let new_signature = base64::engine::general_purpose::STANDARD
+            .decode(NEW_SIGNATURE_B64)
+            .expect("new signature base64");
+        verify_manifest_signature_with_key(
+            VALID_MANIFEST,
+            &new_signature,
+            NEW_RELEASE_PUBLIC_KEY_PEM,
+        )
+        .expect("new signature fixture");
+
+        assert!(verify_manifest_signature(VALID_MANIFEST, &old_signature).is_ok());
+        assert!(verify_manifest_signature(VALID_MANIFEST, &new_signature).is_ok());
+        assert!(verify_manifest_signature(b"changed", &old_signature).is_err());
+        assert!(verify_manifest_signature(b"changed", &new_signature).is_err());
+    }
+
+    #[test]
+    fn rejects_manifests_signed_by_an_untrusted_key() {
+        assert!(verify_manifest_signature(VALID_MANIFEST, &[0; 384]).is_err());
     }
 
     #[test]

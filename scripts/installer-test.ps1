@@ -21,6 +21,26 @@ Assert-Equal $true (Test-SafeZipEntries @('mpaka.exe')) 'safe ZIP entry'
 Assert-Equal $false (Test-SafeZipEntries @('mpaka.exe', 'extra.exe')) 'extra ZIP entry rejection'
 Assert-Equal $false (Test-SafeZipEntries @('../mpaka.exe')) 'parent ZIP entry rejection'
 Assert-Equal $false (Test-SafeZipEntries @('/mpaka.exe')) 'absolute ZIP entry rejection'
+Assert-Equal 'latest-v2' $script:LatestPointerPath 'bridge release pointer'
+
+$manifestBytes = [Text.Encoding]::UTF8.GetBytes('{"version":"v0.2.0"}')
+$primary = [Security.Cryptography.RSA]::Create(2048)
+$fallback = [Security.Cryptography.RSA]::Create(2048)
+$untrusted = [Security.Cryptography.RSA]::Create(2048)
+try {
+    $primaryPem = $primary.ExportSubjectPublicKeyInfoPem()
+    $fallbackPem = $fallback.ExportSubjectPublicKeyInfoPem()
+    $primarySignature = $primary.SignData($manifestBytes, [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
+    $fallbackSignature = $fallback.SignData($manifestBytes, [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
+    $untrustedSignature = $untrusted.SignData($manifestBytes, [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
+    Assert-Equal $true (Test-ManifestSignature -ManifestBytes $manifestBytes -SignatureBytes $primarySignature -PublicKeysPem @($primaryPem, $fallbackPem)) 'primary trusted signature'
+    Assert-Equal $true (Test-ManifestSignature -ManifestBytes $manifestBytes -SignatureBytes $fallbackSignature -PublicKeysPem @($primaryPem, $fallbackPem)) 'fallback trusted signature'
+    Assert-Equal $false (Test-ManifestSignature -ManifestBytes $manifestBytes -SignatureBytes $untrustedSignature -PublicKeysPem @($primaryPem, $fallbackPem)) 'untrusted signature rejection'
+} finally {
+    $primary.Dispose()
+    $fallback.Dispose()
+    $untrusted.Dispose()
+}
 
 if ((Get-Command Get-FileHash -ErrorAction SilentlyContinue) -eq $null) {
     throw 'Get-FileHash is required'

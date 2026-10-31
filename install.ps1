@@ -8,7 +8,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:ReleaseBaseUrl = if ($env:MPAKA_CLI_BASE_URL) { $env:MPAKA_CLI_BASE_URL.TrimEnd('/') } else { 'https://cli.mpaka.dev' }
-$script:EmbeddedPublicKeyPem = @"
+$script:LatestPointerPath = 'latest-v2'
+$script:OldReleasePublicKeyPem = @"
 -----BEGIN PUBLIC KEY-----
 MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAj4+ezaZgsT5NlaDScaKn
 oxXg+CjSmYQLRxe6zHFZTkAj668hHFlgWX7zrYlxLy9qSb29uj4JyBLyCISZOdye
@@ -19,6 +20,19 @@ DAb3IvFxwWkik9kbLpMhuN5RQlMHOXmZPDIkl49thFw6FHgCYPUiUYC+XBOkOzTv
 KzvrwcFabuosV7Sw/Mg1F8hSsdrfnWSphXPvHukrm7SPAQy1Fm80r+YpplwIWJ7s
 59mlh3lfJbzwa6Mej92TmXh35EiV3ImOBdTx8Y7LIdHS2m6YmxxZYiDgDIc//027
 /Vrt9RLw5cYgJKvFWhmvPLAX44naMd+fNQENa8e+DP6tAgMBAAE=
+-----END PUBLIC KEY-----
+"@
+$script:NewReleasePublicKeyPem = @"
+-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAnyBHAJkNHa0jLqrilDuO
+8V5m3kgqEKuNg87kGYui6oleXj0wcxTtH7lsskSSIoTGw/rbvYmYthB7LCM6K0Fl
+JyPAawnP6SEYd0vXfU8PPpuQpgmnSKrVOtt1Xn/d/5eeu5Izgfx9qyamozyAhtKo
+6+63qgG/55KeyYJxul8uRqffedXxISg1gWCsDVigBzEJjERCks9wD0CfLCjUKdat
+8ZHL+iQZ6mdFHUmT66jLu8gEpACq+all/cvrg8SCFeQUA7Fm1XXaMvj6+gq/heLW
+FYEfcI1OBuERG3/3aZI8v1t2QGomKN0DYKM7846w4bdnEA0SXC9vpD7FPl8OYJNh
+86/W06DZ7L0X7Zh2EzCrTYT2zWcwB0zjxe7sDheTXv+qrHZKACOhoVKwMLdf1/EO
+waPDsx9fY9QwUnZGhCpLiCFTa78l07GNchYuVlWF1ZsKgfuzMkSBhAASN+rJzMS0
+UovDuDrszsk6LdOR4mh1q+f7Bo0p0YOUfc7Erj2AEUSzAgMBAAE=
 -----END PUBLIC KEY-----
 "@
 
@@ -86,23 +100,36 @@ function Test-ManifestSignature {
     param(
         [byte[]]$ManifestBytes,
         [byte[]]$SignatureBytes,
-        [string]$PublicKeyPem = $(if ($env:MPAKA_CLI_TEST_PUBLIC_KEY_PEM) { $env:MPAKA_CLI_TEST_PUBLIC_KEY_PEM } else { $script:EmbeddedPublicKeyPem })
-    )
-    $pemBody = ($PublicKeyPem -replace '-----BEGIN PUBLIC KEY-----', '' -replace '-----END PUBLIC KEY-----', '' -replace '\s', '')
-    $der = [Convert]::FromBase64String($pemBody)
-    $bytesRead = 0
-    $rsa = [System.Security.Cryptography.RSA]::Create()
-    try {
-        $rsa.ImportSubjectPublicKeyInfo($der, [ref]$bytesRead)
-        return $rsa.VerifyData(
-            $ManifestBytes,
-            $SignatureBytes,
-            [System.Security.Cryptography.HashAlgorithmName]::SHA256,
-            [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+        [string[]]$PublicKeysPem = $(
+            if ($env:MPAKA_CLI_TEST_PUBLIC_KEY_PEM) {
+                @($env:MPAKA_CLI_TEST_PUBLIC_KEY_PEM)
+                if ($env:MPAKA_CLI_TEST_FALLBACK_PUBLIC_KEY_PEM) { @($env:MPAKA_CLI_TEST_FALLBACK_PUBLIC_KEY_PEM) }
+            } else {
+                @($script:OldReleasePublicKeyPem, $script:NewReleasePublicKeyPem)
+            }
         )
-    } finally {
-        $rsa.Dispose()
+    )
+    $verified = $false
+    foreach ($publicKeyPem in $PublicKeysPem) {
+        $pemBody = ($publicKeyPem -replace '-----BEGIN PUBLIC KEY-----', '' -replace '-----END PUBLIC KEY-----', '' -replace '\s', '')
+        $der = [Convert]::FromBase64String($pemBody)
+        $bytesRead = 0
+        $rsa = [System.Security.Cryptography.RSA]::Create()
+        try {
+            $rsa.ImportSubjectPublicKeyInfo($der, [ref]$bytesRead)
+            if ($rsa.VerifyData(
+                $ManifestBytes,
+                $SignatureBytes,
+                [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+                [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+            )) {
+                $verified = $true
+            }
+        } finally {
+            $rsa.Dispose()
+        }
     }
+    return $verified
 }
 
 function Invoke-MpakaInstaller {
@@ -126,7 +153,7 @@ function Invoke-MpakaInstaller {
     New-Item -ItemType Directory -Path $temp | Out-Null
     try {
         if (-not $Version) {
-            $Version = [Text.Encoding]::UTF8.GetString((Get-ReleaseBytes -Path 'latest')).Trim()
+            $Version = [Text.Encoding]::UTF8.GetString((Get-ReleaseBytes -Path $script:LatestPointerPath)).Trim()
         }
         if (-not (Test-Version $Version)) { throw "invalid release version '$Version'" }
 

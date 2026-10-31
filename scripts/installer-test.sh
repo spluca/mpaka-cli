@@ -26,14 +26,20 @@ for target in \
   printf '#!/bin/sh\nprintf "mpaka 0.1.0\\n"\n' > "$input/mpaka-$target"
 done
 
-signing_key="$work/signing-key.pem"
-public_key="$work/public.pem"
-openssl genrsa 2048 2>/dev/null > "$signing_key"
-openssl rsa -in "$signing_key" -pubout -out "$public_key" 2>/dev/null
+primary_key="$work/primary-key.pem"
+primary_public="$work/primary-public.pem"
+fallback_key="$work/fallback-key.pem"
+fallback_public="$work/fallback-public.pem"
+untrusted_key="$work/untrusted-key.pem"
+openssl genrsa 2048 2>/dev/null > "$primary_key"
+openssl rsa -in "$primary_key" -pubout -out "$primary_public" 2>/dev/null
+openssl genrsa 2048 2>/dev/null > "$fallback_key"
+openssl rsa -in "$fallback_key" -pubout -out "$fallback_public" 2>/dev/null
+openssl genrsa 2048 2>/dev/null > "$untrusted_key"
 "$root/scripts/cli-release.sh" package --version v0.1.0 --input-dir "$input" --output-dir "$artifacts"
-"$root/scripts/cli-release.sh" manifest --version v0.1.0 --artifact-dir "$artifacts" --output-dir "$release" --signing-key "$signing_key"
+"$root/scripts/cli-release.sh" manifest --version v0.1.0 --artifact-dir "$artifacts" --output-dir "$release" --signing-key "$fallback_key"
 cp "$release"/* "$server_root/cli/releases/v0.1.0/"
-printf 'v0.1.0\n' > "$server_root/cli/latest"
+printf 'v0.1.0\n' > "$server_root/cli/latest-v2"
 
 cert="$work/cert.pem"
 openssl req -x509 -newkey rsa:2048 -nodes -keyout "$work/tls-key.pem" -out "$cert" -days 1 -subj '/CN=localhost' 2>/dev/null
@@ -41,12 +47,13 @@ port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); 
 (cd "$server_root" && openssl s_server -quiet -WWW -accept "$port" -cert "$cert" -key "$work/tls-key.pem" >"$work/server.log" 2>&1) &
 server_pid=$!
 for _ in {1..50}; do
-  if curl --silent --show-error --fail --cacert "$cert" "https://localhost:$port/cli/latest" >/dev/null 2>&1; then break; fi
+  if curl --silent --show-error --fail --cacert "$cert" "https://localhost:$port/cli/latest-v2" >/dev/null 2>&1; then break; fi
   sleep 0.1
 done
 
 base_url="https://localhost:$port/cli"
-public_pem="$(cat "$public_key")"
+primary_pem="$(cat "$primary_public")"
+fallback_pem="$(cat "$fallback_public")"
 
 for pair in 'Linux:x86_64' 'Linux:armv7l' 'Linux:aarch64' 'Darwin:x86_64' 'Darwin:arm64'; do
   os="${pair%%:*}"; arch="${pair##*:}"
@@ -55,16 +62,26 @@ for pair in 'Linux:x86_64' 'Linux:armv7l' 'Linux:aarch64' 'Darwin:x86_64' 'Darwi
 done
 
 home="$work/home"
-install_output="$(HOME="$home" MPAKA_CLI_BASE_URL="$base_url" MPAKA_CLI_CA_CERT="$cert" MPAKA_CLI_TEST_PUBLIC_KEY_PEM="$public_pem" "$root/install" 2>&1)"
+install_output="$(HOME="$home" MPAKA_CLI_BASE_URL="$base_url" MPAKA_CLI_CA_CERT="$cert" MPAKA_CLI_TEST_PUBLIC_KEY_PEM="$primary_pem" MPAKA_CLI_TEST_FALLBACK_PUBLIC_KEY_PEM="$fallback_pem" "$root/install" 2>&1)"
 test -x "$home/.local/bin/mpaka"
 test "$("$home/.local/bin/mpaka" --version)" = 'mpaka 0.1.0'
 [[ "$install_output" == *"PATH"* ]]
+
+rm "$release/manifest.json" "$release/manifest.json.sig"
+"$root/scripts/cli-release.sh" manifest --version v0.1.0 --artifact-dir "$artifacts" --output-dir "$release" --signing-key "$primary_key"
+cp "$release/manifest.json" "$release/manifest.json.sig" "$server_root/cli/releases/v0.1.0/"
+primary_home="$work/primary-home"
+HOME="$primary_home" MPAKA_CLI_BASE_URL="$base_url" MPAKA_CLI_CA_CERT="$cert" MPAKA_CLI_TEST_PUBLIC_KEY_PEM="$primary_pem" MPAKA_CLI_TEST_FALLBACK_PUBLIC_KEY_PEM="$fallback_pem" "$root/install" >/dev/null
+test -x "$primary_home/.local/bin/mpaka"
 
 if MPAKA_CLI_BASE_URL='http://127.0.0.1:1/cli' "$root/install" >/dev/null 2>&1; then
   printf 'installer accepted a non-HTTPS base URL\n' >&2
   exit 1
 fi
-if MPAKA_CLI_BASE_URL="$base_url" MPAKA_CLI_CA_CERT="$cert" MPAKA_CLI_TEST_PUBLIC_KEY_PEM="$(cat "$work/tls-key.pem")" HOME="$work/bad-home" "$root/install" >/dev/null 2>&1; then
+rm "$release/manifest.json" "$release/manifest.json.sig"
+"$root/scripts/cli-release.sh" manifest --version v0.1.0 --artifact-dir "$artifacts" --output-dir "$release" --signing-key "$untrusted_key"
+cp "$release/manifest.json" "$release/manifest.json.sig" "$server_root/cli/releases/v0.1.0/"
+if MPAKA_CLI_BASE_URL="$base_url" MPAKA_CLI_CA_CERT="$cert" MPAKA_CLI_TEST_PUBLIC_KEY_PEM="$primary_pem" MPAKA_CLI_TEST_FALLBACK_PUBLIC_KEY_PEM="$fallback_pem" HOME="$work/bad-home" "$root/install" >/dev/null 2>&1; then
   printf 'installer accepted an invalid manifest signature\n' >&2
   exit 1
 fi

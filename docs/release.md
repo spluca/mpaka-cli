@@ -1,7 +1,9 @@
 # mPaka CLI release operations
 
-The CLI distribution is served at `https://cli.mpaka.dev`. Versioned
-release objects are immutable; `latest` is the only mutable pointer.
+The CLI distribution is served at `https://cli.mpaka.dev`. Versioned release
+objects are immutable. `latest` remains fixed at `v0.2.0` as the compatibility
+bridge for v0.1.0 clients, while `latest-v2` is the active stable pointer for
+v0.2.0 and every later client and installer.
 
 ## Cloudflare configuration
 
@@ -60,24 +62,28 @@ workspace version.
 
 The tag workflow builds and smoke-tests all six targets, signs the exact
 `manifest.json` bytes, publishes `releases/<version>/`, verifies every public
-object, and only then writes `latest`.
+object, and only then writes `latest-v2`. It must never advance `latest` beyond
+v0.2.0.
 
 To roll back, choose an already published version and update only the R2
-`latest` object to that exact `vX.Y.Z` line. Do not overwrite or delete the
-version prefix. Then run:
+`latest-v2` object to that exact `vX.Y.Z` line. Do not change `latest`, and do
+not overwrite or delete the version prefix. Then run:
 
 ```bash
-MPAKA_CLI_PUBLIC_KEY_FILE=/secure/path/mpaka-release-public.pem \
+MPAKA_CLI_LEGACY_PUBLIC_KEY_FILE=/secure/path/mpaka-old-release-public.pem \
+MPAKA_CLI_ACTIVE_PUBLIC_KEY_FILE=/secure/path/mpaka-release-public.pem \
 MPAKA_CLI_PUBLIC_BASE_URL=https://cli.mpaka.dev \
   scripts/cli-public-acceptance.sh
 ```
 
-If verification fails, restore the previous `latest` value and investigate the
-Worker/R2 or Access change before attempting another rollback.
+If verification fails, restore the previous `latest-v2` value and investigate
+the Worker/R2 or Access change before attempting another rollback.
 
 ## Key rotation
 
-Generate a new RSA-3072 key outside Git, ship its public key in a reviewed CLI
-and installer release, configure the new protected signing secret, and publish
-only after the new verifier has passed PR and staging checks. Do not replace the
-public key in place without a corresponding installer/CLI release.
+The v0.2.0 bridge accepts the old and new RSA-3072 public keys but is signed by
+the old key, allowing v0.1.0 to install it. Both bridge pointers initially name
+v0.2.0. The v0.3.0 release is signed by and trusts only the new key, advances
+only `latest-v2`, and leaves `latest` on v0.2.0 permanently. Delete the old
+secret only after a disposable v0.1.0 binary has updated through v0.2.0 to
+v0.3.0 and public acceptance passes with both public keys.

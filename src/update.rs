@@ -14,6 +14,7 @@ use std::{
 };
 
 const MAX_RELEASE_BYTES: u64 = 50 * 1024 * 1024;
+const LATEST_POINTER: &str = "latest-v2";
 
 #[derive(Debug, Clone)]
 pub struct UpdateRequest {
@@ -225,7 +226,7 @@ pub async fn self_update(request: UpdateRequest) -> Result<UpdateResult, UpdateE
     let latest = request
         .version
         .clone()
-        .unwrap_or(fetch_text(&client, &base, "latest").await?);
+        .unwrap_or(fetch_text(&client, &base, LATEST_POINTER).await?);
     let decision = select_version(&current_version, request.version.as_deref(), latest.trim())?;
     let candidate_version = match decision {
         UpdateDecision::Noop(version) => version,
@@ -491,6 +492,11 @@ mod tests {
             select_version("v0.2.0", None, "v0.1.0").expect("no-op"),
             UpdateDecision::Noop("v0.2.0".into())
         );
+    }
+
+    #[test]
+    fn bridge_clients_use_latest_v2_for_implicit_updates() {
+        assert_eq!(LATEST_POINTER, "latest-v2");
     }
 
     #[test]

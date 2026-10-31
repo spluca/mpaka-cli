@@ -17,13 +17,14 @@ const objects = {
   'install': { body: '#!/bin/sh\necho install\n', contentType: 'text/plain; charset=utf-8' },
   'install.ps1': { body: 'Write-Output install\n', contentType: 'text/plain; charset=utf-8' },
   'latest': { body: 'v0.1.0\n', contentType: 'text/plain; charset=utf-8' },
+  'latest-v2': { body: 'v0.2.0\n', contentType: 'text/plain; charset=utf-8' },
   'releases/v0.1.0/manifest.json': { body: '{"version":"v0.1.0"}\n', contentType: 'application/json' },
   'releases/v0.1.0/manifest.json.sig': { body: 'signature', contentType: 'application/octet-stream' },
   'releases/v0.1.0/mpaka-x86_64-unknown-linux-musl.tar.gz': { body: 'archive', contentType: 'application/gzip' },
 };
 
 test('serves allowed CLI distribution paths from R2', async () => {
-  for (const path of ['/install', '/install.ps1', '/latest', '/releases/v0.1.0/manifest.json', '/releases/v0.1.0/manifest.json.sig', '/releases/v0.1.0/mpaka-x86_64-unknown-linux-musl.tar.gz']) {
+  for (const path of ['/install', '/install.ps1', '/latest', '/latest-v2', '/releases/v0.1.0/manifest.json', '/releases/v0.1.0/manifest.json.sig', '/releases/v0.1.0/mpaka-x86_64-unknown-linux-musl.tar.gz']) {
     const response = await handleRequest(new Request(`https://cli.mpaka.dev${path}`), fixtureEnv(objects));
     assert.equal(response.status, 200, path);
   }
@@ -31,6 +32,8 @@ test('serves allowed CLI distribution paths from R2', async () => {
 
 test('maps only approved public paths to R2 keys', () => {
   assert.equal(keyForPath('/latest'), 'latest');
+  assert.equal(keyForPath('/latest-v2'), 'latest-v2');
+  assert.equal(keyForPath('/latest-v2/extra'), null);
   assert.equal(keyForPath('/releases/v0.1.0/manifest.json'), 'releases/v0.1.0/manifest.json');
   assert.equal(keyForPath('/releases/v0.1.0/unknown'), null);
   assert.equal(keyForPath('/../secrets'), null);
@@ -38,8 +41,10 @@ test('maps only approved public paths to R2 keys', () => {
 
 test('uses short cache for latest and immutable cache for releases', async () => {
   const latest = await handleRequest(new Request('https://cli.mpaka.dev/latest'), fixtureEnv(objects));
+  const latestV2 = await handleRequest(new Request('https://cli.mpaka.dev/latest-v2'), fixtureEnv(objects));
   const release = await handleRequest(new Request('https://cli.mpaka.dev/releases/v0.1.0/manifest.json'), fixtureEnv(objects));
   assert.match(latest.headers.get('cache-control'), /no-cache/);
+  assert.match(latestV2.headers.get('cache-control'), /no-cache/);
   assert.match(release.headers.get('cache-control'), /immutable/);
 });
 

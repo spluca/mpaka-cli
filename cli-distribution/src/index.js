@@ -17,7 +17,7 @@ export function keyForPath(pathname) {
   }
   if (!decoded.startsWith('/') || decoded.includes('..') || decoded.includes('\\') || decoded.includes('//')) return null;
   const relative = decoded.slice(1);
-  if (relative === 'install' || relative === 'install.ps1' || relative === 'latest') return relative;
+  if (relative === 'install' || relative === 'install.ps1' || relative === 'latest' || relative === 'latest-v2') return relative;
   const match = relative.match(/^releases\/(v[0-9]+\.[0-9]+\.[0-9]+)\/(manifest\.json|manifest\.json\.sig|[^/]+)$/);
   if (!match || !VERSION.test(match[1])) return null;
   if (match[2] === 'manifest.json' || match[2] === 'manifest.json.sig' || ARTIFACTS.has(match[2])) {
