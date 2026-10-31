@@ -13,6 +13,19 @@ Location: https://spluca.cloudflareaccess.com/cdn-cgi/access/login/app.mpaka.dev
 WWW-Authenticate: Cloudflare-Access resource_metadata="https://app.mpaka.dev/.well-known/cloudflare-access-protected-resource/"
 EOF
 require_cloudflare_access_redirect 302 "$work/access.headers" spluca.cloudflareaccess.com
+require_release_pointer v0.2.0 compatibility
+require_release_pointer v0.3.0 active
+require_compatibility_pointer v0.2.0 v0.2.0
+require_compatibility_pointer v0.2.0 v0.3.0
+
+if require_release_pointer 0.2.0 malformed 2>/dev/null; then
+  printf 'malformed release pointer was accepted\n' >&2
+  exit 1
+fi
+if require_compatibility_pointer v0.1.0 v0.3.0 2>/dev/null; then
+  printf 'legacy pointer was allowed to skip the v0.2.0 bridge\n' >&2
+  exit 1
+fi
 
 cat > "$work/generic-login.headers" <<'EOF'
 HTTP/2 302

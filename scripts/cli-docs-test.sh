@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 docs_file="$root_dir/docs/cli.md"
+release_file="$root_dir/docs/release.md"
 
 required_snippets=(
   'curl -fsSL https://cli.mpaka.dev/install | bash'
@@ -17,12 +18,25 @@ required_snippets=(
   'aarch64-apple-darwin'
   'mpaka self-update --check'
   'latest'
+  'latest-v2'
+  'run `mpaka self-update` twice'
   'rollback'
 )
 
 for snippet in "${required_snippets[@]}"; do
   if ! grep -Fq -- "$snippet" "$docs_file"; then
     printf 'missing CLI documentation snippet: %s\n' "$snippet" >&2
+    exit 1
+  fi
+done
+
+for snippet in \
+  '`latest` remains fixed at `v0.2.0`' \
+  '`latest-v2` is the active stable pointer' \
+  'MPAKA_CLI_LEGACY_PUBLIC_KEY_FILE' \
+  'MPAKA_CLI_ACTIVE_PUBLIC_KEY_FILE'; do
+  if ! grep -Fq -- "$snippet" "$release_file"; then
+    printf 'missing release documentation snippet: %s\n' "$snippet" >&2
     exit 1
   fi
 done

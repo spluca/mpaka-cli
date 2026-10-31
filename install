@@ -4,7 +4,7 @@ set -Eeuo pipefail
 readonly INSTALLER_NAME="mpaka installer"
 readonly DEFAULT_BASE_URL="https://cli.mpaka.dev"
 INSTALL_TEMP_DIR=''
-readonly EMBEDDED_PUBLIC_KEY_PEM="-----BEGIN PUBLIC KEY-----
+readonly OLD_RELEASE_PUBLIC_KEY_PEM="-----BEGIN PUBLIC KEY-----
 MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAj4+ezaZgsT5NlaDScaKn
 oxXg+CjSmYQLRxe6zHFZTkAj668hHFlgWX7zrYlxLy9qSb29uj4JyBLyCISZOdye
 FumDXOZOiVwVl2HDINiaWAAHzRSC7Jm21MZ5DYR6fV2gm50Rm+r8DO72OhlQqH/T
@@ -14,6 +14,17 @@ DAb3IvFxwWkik9kbLpMhuN5RQlMHOXmZPDIkl49thFw6FHgCYPUiUYC+XBOkOzTv
 KzvrwcFabuosV7Sw/Mg1F8hSsdrfnWSphXPvHukrm7SPAQy1Fm80r+YpplwIWJ7s
 59mlh3lfJbzwa6Mej92TmXh35EiV3ImOBdTx8Y7LIdHS2m6YmxxZYiDgDIc//027
 /Vrt9RLw5cYgJKvFWhmvPLAX44naMd+fNQENa8e+DP6tAgMBAAE=
+-----END PUBLIC KEY-----"
+readonly NEW_RELEASE_PUBLIC_KEY_PEM="-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAnyBHAJkNHa0jLqrilDuO
+8V5m3kgqEKuNg87kGYui6oleXj0wcxTtH7lsskSSIoTGw/rbvYmYthB7LCM6K0Fl
+JyPAawnP6SEYd0vXfU8PPpuQpgmnSKrVOtt1Xn/d/5eeu5Izgfx9qyamozyAhtKo
+6+63qgG/55KeyYJxul8uRqffedXxISg1gWCsDVigBzEJjERCks9wD0CfLCjUKdat
+8ZHL+iQZ6mdFHUmT66jLu8gEpACq+all/cvrg8SCFeQUA7Fm1XXaMvj6+gq/heLW
+FYEfcI1OBuERG3/3aZI8v1t2QGomKN0DYKM7846w4bdnEA0SXC9vpD7FPl8OYJNh
+86/W06DZ7L0X7Zh2EzCrTYT2zWcwB0zjxe7sDheTXv+qrHZKACOhoVKwMLdf1/EO
+waPDsx9fY9QwUnZGhCpLiCFTa78l07GNchYuVlWF1ZsKgfuzMkSBhAASN+rJzMS0
+UovDuDrszsk6LdOR4mh1q+f7Bo0p0YOUfc7Erj2AEUSzAgMBAAE=
 -----END PUBLIC KEY-----"
 
 die() {
@@ -80,6 +91,29 @@ sha256_file() {
   fi
 }
 
+verify_manifest_signature() {
+  local manifest="$1" signature="$2" key_dir="$3" index=0 key_file key_pem
+  local -a trusted_keys
+  if [[ -n "${MPAKA_CLI_TEST_PUBLIC_KEY_PEM:-}" ]]; then
+    trusted_keys=("$MPAKA_CLI_TEST_PUBLIC_KEY_PEM")
+    if [[ -n "${MPAKA_CLI_TEST_FALLBACK_PUBLIC_KEY_PEM:-}" ]]; then
+      trusted_keys+=("$MPAKA_CLI_TEST_FALLBACK_PUBLIC_KEY_PEM")
+    fi
+  else
+    trusted_keys=("$OLD_RELEASE_PUBLIC_KEY_PEM" "$NEW_RELEASE_PUBLIC_KEY_PEM")
+  fi
+  for key_pem in "${trusted_keys[@]}"; do
+    key_file="$key_dir/public-$index.pem"
+    printf '%s\n' "$key_pem" > "$key_file"
+    chmod 0600 "$key_file"
+    if openssl dgst -sha256 -verify "$key_file" -signature "$signature" "$manifest" >/dev/null 2>&1; then
+      return 0
+    fi
+    index=$((index + 1))
+  done
+  return 1
+}
+
 main() {
   local requested_version=''
   while (($#)); do
@@ -111,17 +145,15 @@ main() {
   if [[ -n "$requested_version" ]]; then
     version="$requested_version"
   else
-    download "$base_url/latest" "$temp_dir/latest" "$base_url"
-    version="$(tr -d '\r\n' < "$temp_dir/latest")"
+    download "$base_url/latest-v2" "$temp_dir/latest-v2" "$base_url"
+    version="$(tr -d '\r\n' < "$temp_dir/latest-v2")"
   fi
   version_valid "$version" || die "invalid release version: $version"
 
-  local public_key="$temp_dir/public.pem"
-  printf '%s\n' "${MPAKA_CLI_TEST_PUBLIC_KEY_PEM:-$EMBEDDED_PUBLIC_KEY_PEM}" > "$public_key"
   local manifest="$temp_dir/manifest.json" signature="$temp_dir/manifest.json.sig"
   download "$base_url/releases/$version/manifest.json" "$manifest" "$base_url"
   download "$base_url/releases/$version/manifest.json.sig" "$signature" "$base_url"
-  openssl dgst -sha256 -verify "$public_key" -signature "$signature" "$manifest" >/dev/null \
+  verify_manifest_signature "$manifest" "$signature" "$temp_dir" \
     || die 'manifest signature verification failed'
 
   local manifest_version

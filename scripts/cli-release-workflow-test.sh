@@ -2,7 +2,9 @@
 set -Eeuo pipefail
 
 workflow="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.github/workflows/release.yml"
+bridge_workflow="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.github/workflows/bridge-publish.yml"
 test -s "$workflow"
+test -s "$bridge_workflow"
 grep -Fq 'pull_request' "$workflow"
 grep -Fq 'tags:' "$workflow"
 grep -Fq -- "- 'v*'" "$workflow"
@@ -19,13 +21,50 @@ grep -Fq 'cargo xwin build' "$workflow"
 grep -Fq 'cargo zigbuild' "$workflow"
 grep -Fq 'cross build' "$workflow"
 grep -Fq "grep -Fq 'mPaka CLI'" "$workflow"
-grep -Fq "environment: \${{ github.ref_type == 'tag' && 'release' || 'verify' }}" "$workflow"
-grep -Fq "secrets.MPAKA_CLI_RELEASE_SIGNING_KEY || ''" "$workflow"
+grep -Fq "environment: \${{ github.event_name == 'push' && github.ref_type == 'tag' && github.ref_name != 'v0.2.0' && 'release' || 'verify' }}" "$workflow"
+grep -Fq "github.ref_name != 'v0.2.0' && secrets.MPAKA_CLI_RELEASE_SIGNING_KEY || ''" "$workflow"
 grep -Fq 'powershell-installer:' "$workflow"
 grep -Fq 'runs-on: windows-2025' "$workflow"
 grep -Fq 'pwsh -NoProfile -File scripts/installer-test.ps1' "$workflow"
 grep -Fq 'needs: [build, powershell-installer]' "$workflow"
-unpinned_actions="$(grep -E '^[[:space:]]+(-[[:space:]]+)?uses:' "$workflow" | grep -Ev 'uses:[[:space:]]+[^[:space:]]+@[0-9a-f]{40}([[:space:]]+#[[:space:]].+)?$' || true)"
+grep -Fq 'workflow_dispatch:' "$workflow"
+grep -Fq 'bridge_version:' "$workflow"
+grep -Fq -- "- 'v0.2.0'" "$workflow"
+grep -Fq 'mpaka-cli-v0.2.0-prepared' "$workflow"
+grep -Fq 'source-commit' "$workflow"
+grep -Fq 'manifest.sha256' "$workflow"
+grep -Fq 'rm -f "$work/release/manifest.json.sig"' "$workflow"
+grep -Fq "github.ref_name != 'v0.2.0'" "$workflow"
+grep -Fq 'mpaka-cli-releases/latest-v2' "$workflow"
+
+for required in \
+  'actions: read' \
+  'contents: read' \
+  'environment: release' \
+  "github.actor == github.repository_owner" \
+  'prepare_run_id:' \
+  'expected_commit:' \
+  'manifest_sha256:' \
+  'manifest_signature_base64:' \
+  'run-id: ${{ inputs.prepare_run_id }}' \
+  'mpaka-cli-v0.2.0-prepared' \
+  'immutable bridge release already exists with a different manifest' \
+  'openssl dgst -sha256 -verify' \
+  'scripts/cli-release.sh verify --version v0.2.0' \
+  'mpaka-cli-releases/latest-v2' \
+  'mpaka-cli-releases/latest'; do
+  grep -Fq -- "$required" "$bridge_workflow"
+done
+if grep -Fq 'MPAKA_CLI_RELEASE_SIGNING_KEY' "$bridge_workflow"; then
+  printf 'bridge publisher must not access a private signing key\n' >&2
+  exit 1
+fi
+comparison_line="$(grep -nF 'cmp --silent "$file"' "$bridge_workflow" | tail -1 | cut -d: -f1)"
+latest_line="$(grep -nF 'mpaka-cli-releases/latest"' "$bridge_workflow" | tail -1 | cut -d: -f1)"
+latest_v2_line="$(grep -nF 'mpaka-cli-releases/latest-v2"' "$bridge_workflow" | tail -1 | cut -d: -f1)"
+test "$latest_line" -gt "$comparison_line"
+test "$latest_v2_line" -gt "$comparison_line"
+unpinned_actions="$(grep -E '^[[:space:]]+(-[[:space:]]+)?uses:' "$workflow" "$bridge_workflow" | grep -Ev 'uses:[[:space:]]+[^[:space:]]+@[0-9a-f]{40}([[:space:]]+#[[:space:]].+)?$' || true)"
 if [[ -n "$unpinned_actions" ]]; then
   printf 'every third-party Action must be pinned to a commit SHA:\n%s\n' "$unpinned_actions" >&2
   exit 1

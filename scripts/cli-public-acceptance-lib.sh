@@ -1,5 +1,23 @@
 #!/usr/bin/env bash
 
+require_release_pointer() {
+  local value="$1" label="$2"
+  [[ "$value" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    printf '%s release pointer is invalid: %s\n' "$label" "$value" >&2
+    return 1
+  }
+}
+
+require_compatibility_pointer() {
+  local compatibility="$1" active="$2"
+  require_release_pointer "$compatibility" compatibility || return 1
+  require_release_pointer "$active" active || return 1
+  [[ "$compatibility" == v0.2.0 ]] || {
+    printf 'compatibility pointer must remain v0.2.0, got %s\n' "$compatibility" >&2
+    return 1
+  }
+}
+
 require_cloudflare_access_redirect() {
   local status="$1" headers="$2" access_host="$3" location access_prefix
 

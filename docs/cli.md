@@ -47,11 +47,11 @@ Supported release targets:
 | macOS | x86_64 | `x86_64-apple-darwin` |
 | macOS | Apple Silicon | `aarch64-apple-darwin` |
 
-The release channel keeps versioned artifacts immutable. The `latest` pointer
-is updated only after all versioned objects have been uploaded and publicly
-verified. If a release must be withdrawn, point `latest` back to the last
-known-good version; existing versioned releases remain available for pinned
-installs and rollback.
+The release channel keeps versioned artifacts immutable. Current clients and
+installers use `latest-v2`, which is updated only after all versioned objects
+have been uploaded and publicly verified. The original `latest` pointer stays
+on the signed v0.2.0 compatibility release so an older v0.1.0 installation can
+still cross the signing-key rotation safely.
 
 The CLI can check and apply updates after installation:
 
@@ -60,6 +60,15 @@ mpaka self-update --check
 mpaka self-update
 mpaka self-update --version v0.1.0  # explicit rollback or pin
 ```
+
+If you still have v0.1.0 after the signing-key rotation, run `mpaka self-update` twice: the first run installs the trusted v0.2.0 bridge and the second moves from
+that bridge to the current `latest-v2` release. Do not try to jump directly
+from v0.1.0 to a later explicit version; the old client correctly rejects the
+new signing key.
+
+If a current release must be withdrawn, the operator moves `latest-v2` back to
+an already published known-good version. Existing immutable versions remain
+available for pinned installs and rollback.
 
 On Windows, self-update uses a short-lived helper process to replace the
 executable after the running process exits. An interrupted update leaves the
