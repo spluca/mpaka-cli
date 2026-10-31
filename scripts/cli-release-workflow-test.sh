@@ -41,20 +41,28 @@ for required in \
   'actions: read' \
   'contents: read' \
   'environment: release' \
-  "github.actor == github.repository_owner" \
+  "github.actor_id == '70755911'" \
   'prepare_run_id:' \
   'expected_commit:' \
   'manifest_sha256:' \
   'manifest_signature_base64:' \
   'run-id: ${{ inputs.prepare_run_id }}' \
   'mpaka-cli-v0.2.0-prepared' \
-  'immutable bridge release already exists with a different manifest' \
   'openssl dgst -sha256 -verify' \
   'scripts/cli-release.sh verify --version v0.2.0' \
+  'scripts/cli-bridge-run-metadata.sh validate' \
+  'scripts/cli-bridge-publish.sh release' \
+  'scripts/cli-bridge-publish.sh installers' \
+  'cmp --silent "$bundle/install" "$GITHUB_WORKSPACE/install"' \
+  'cmp --silent "$bundle/install.ps1" "$GITHUB_WORKSPACE/install.ps1"' \
   'mpaka-cli-releases/latest-v2' \
   'mpaka-cli-releases/latest'; do
   grep -Fq -- "$required" "$bridge_workflow"
 done
+if grep -Fq 'github.actor == github.repository_owner' "$bridge_workflow"; then
+  printf 'organization-owned repository cannot authorize a user by repository_owner login\n' >&2
+  exit 1
+fi
 if grep -Fq 'MPAKA_CLI_RELEASE_SIGNING_KEY' "$bridge_workflow"; then
   printf 'bridge publisher must not access a private signing key\n' >&2
   exit 1
@@ -64,6 +72,8 @@ latest_line="$(grep -nF 'mpaka-cli-releases/latest"' "$bridge_workflow" | tail -
 latest_v2_line="$(grep -nF 'mpaka-cli-releases/latest-v2"' "$bridge_workflow" | tail -1 | cut -d: -f1)"
 test "$latest_line" -gt "$comparison_line"
 test "$latest_v2_line" -gt "$comparison_line"
+test "$latest_v2_line" -lt "$latest_line"
+grep -Fq 'immutable object differs' "$(dirname "$workflow")/../../scripts/cli-bridge-publish.sh"
 unpinned_actions="$(grep -E '^[[:space:]]+(-[[:space:]]+)?uses:' "$workflow" "$bridge_workflow" | grep -Ev 'uses:[[:space:]]+[^[:space:]]+@[0-9a-f]{40}([[:space:]]+#[[:space:]].+)?$' || true)"
 if [[ -n "$unpinned_actions" ]]; then
   printf 'every third-party Action must be pinned to a commit SHA:\n%s\n' "$unpinned_actions" >&2
@@ -86,6 +96,8 @@ for target in \
   aarch64-apple-darwin; do
   grep -Fq "$target" "$workflow"
 done
+bash "$(dirname "$workflow")/../../scripts/cli-bridge-run-metadata-test.sh"
+bash "$(dirname "$workflow")/../../scripts/cli-bridge-publish-test.sh"
 if grep -Eq 'run:.*(wrangler|r2 object put)' "$workflow" && ! grep -Fq "github.event_name == 'push'" "$workflow"; then
   printf 'publication command is not tag-gated\n' >&2
   exit 1

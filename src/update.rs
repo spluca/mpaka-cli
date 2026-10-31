@@ -122,6 +122,20 @@ fn parse_version(version: &str) -> Result<(u64, u64, u64), UpdateError> {
     ))
 }
 
+async fn resolve_update_version<F, Fut>(
+    explicit: Option<String>,
+    fetch_latest: F,
+) -> Result<String, UpdateError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<String, UpdateError>>,
+{
+    match explicit {
+        Some(version) => Ok(version),
+        None => fetch_latest().await,
+    }
+}
+
 pub fn current_executable() -> Result<PathBuf, UpdateError> {
     std::env::current_exe().map_err(UpdateError::Io)
 }
@@ -223,10 +237,10 @@ pub async fn self_update(request: UpdateRequest) -> Result<UpdateResult, UpdateE
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|error| UpdateError::Request(error.to_string()))?;
-    let latest = request
-        .version
-        .clone()
-        .unwrap_or(fetch_text(&client, &base, LATEST_POINTER).await?);
+    let latest = resolve_update_version(request.version.clone(), || {
+        fetch_text(&client, &base, LATEST_POINTER)
+    })
+    .await?;
     let decision = select_version(&current_version, request.version.as_deref(), latest.trim())?;
     let candidate_version = match decision {
         UpdateDecision::Noop(version) => version,
@@ -505,6 +519,16 @@ mod tests {
             select_version("v0.2.0", Some("v0.1.0"), "v0.2.0").expect("rollback"),
             UpdateDecision::Apply("v0.1.0".into())
         );
+    }
+
+    #[tokio::test]
+    async fn explicit_version_does_not_fetch_latest_pointer() {
+        let version = resolve_update_version(Some("v0.2.0".into()), || async {
+            Err(UpdateError::Request("latest pointer fetched".into()))
+        })
+        .await
+        .expect("explicit version");
+        assert_eq!(version, "v0.2.0");
     }
 
     #[test]
