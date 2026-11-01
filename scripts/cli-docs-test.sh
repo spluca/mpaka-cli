@@ -7,7 +7,9 @@ release_file="$root_dir/docs/release.md"
 
 required_snippets=(
   'curl -fsSL https://cli.mpaka.dev/install | bash'
-  '--version v0.1.0'
+  'bash -s -- --version v0.3.0'
+  'mpaka self-update --version v0.3.0'
+  'chmod +x ~/.local/bin/mpaka'
   'https://cli.mpaka.dev/install.ps1'
   'SHA-256'
   'x86_64-unknown-linux-musl'
@@ -40,6 +42,12 @@ for snippet in \
     exit 1
   fi
 done
+
+# Current clients and installers reject manifests signed by the retired key.
+if grep -Eq -- '--version v0\.[12]\.0' "$docs_file"; then
+  printf 'CLI documentation pins a release signed by the retired key\n' >&2
+  exit 1
+fi
 
 if grep -Fq 'curl -fsSL https://cli.mpaka.dev/install.ps1 | bash' "$docs_file"; then
   printf 'PowerShell installer documented with the wrong shell\n' >&2

@@ -15,8 +15,11 @@ mpaka --version
 To install an exact immutable release, pass its version to the installer:
 
 ```bash
-curl -fsSL https://cli.mpaka.dev/install | bash -s -- --version v0.1.0
+curl -fsSL https://cli.mpaka.dev/install | bash -s -- --version v0.3.0
 ```
+
+Pinned installs work for v0.3.0 and later. Earlier releases are signed by the
+retired release key, which current installers reject.
 
 On Windows PowerShell:
 
@@ -58,7 +61,7 @@ The CLI can check and apply updates after installation:
 ```bash
 mpaka self-update --check
 mpaka self-update
-mpaka self-update --version v0.1.0  # explicit rollback or pin
+mpaka self-update --version v0.3.0  # explicit rollback or pin (v0.3.0 or later)
 ```
 
 If you still have v0.1.0 after the signing-key rotation, run `mpaka self-update` twice: the first run installs the trusted v0.2.0 bridge and the second moves from
@@ -68,19 +71,23 @@ new signing key.
 
 On Linux and macOS, `mpaka self-update` in v0.2.0 and earlier replaces the
 binary without its executable permission, so the updated `mpaka` fails with
-`permission denied`. If you update from one of those versions, restore the
-permission after each self-update:
+`permission denied`. Restore the permission after each of those updates,
+including between the two v0.1.0 steps above:
 
 ```bash
+mpaka self-update                 # v0.1.0 -> v0.2.0
+chmod +x ~/.local/bin/mpaka
+mpaka self-update                 # v0.2.0 -> current release
 chmod +x ~/.local/bin/mpaka
 ```
 
 Alternatively, rerun the installer, which always installs an executable
-binary. Updates that start from a later release keep the permission.
+binary. Updates that start from v0.3.0 or later keep the permission.
 
 If a current release must be withdrawn, the operator moves `latest-v2` back to
-an already published known-good version. Existing immutable versions remain
-available for pinned installs and rollback.
+an already published known-good version of v0.3.0 or later. Earlier releases
+are signed by the retired key, so current clients reject them. Existing
+immutable versions remain available for pinned installs and rollback.
 
 On Windows, self-update uses a short-lived helper process to replace the
 executable after the running process exits. An interrupted update leaves the

@@ -9,20 +9,7 @@ $ErrorActionPreference = 'Stop'
 
 $script:ReleaseBaseUrl = if ($env:MPAKA_CLI_BASE_URL) { $env:MPAKA_CLI_BASE_URL.TrimEnd('/') } else { 'https://cli.mpaka.dev' }
 $script:LatestPointerPath = 'latest-v2'
-$script:OldReleasePublicKeyPem = @"
------BEGIN PUBLIC KEY-----
-MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAj4+ezaZgsT5NlaDScaKn
-oxXg+CjSmYQLRxe6zHFZTkAj668hHFlgWX7zrYlxLy9qSb29uj4JyBLyCISZOdye
-FumDXOZOiVwVl2HDINiaWAAHzRSC7Jm21MZ5DYR6fV2gm50Rm+r8DO72OhlQqH/T
-R5UKnUN8YxnlJZoVb73PqxFnwpYN7E0Cuc8D0VI47Vor06gdvTTaXCY+L7+UlT/H
-kcd2UeMkBQcYtusdqvBn1hVeIg3UYQL2QoaN5DNTHtGg5Xoj3FtaJt5QFWqO/hUs
-DAb3IvFxwWkik9kbLpMhuN5RQlMHOXmZPDIkl49thFw6FHgCYPUiUYC+XBOkOzTv
-KzvrwcFabuosV7Sw/Mg1F8hSsdrfnWSphXPvHukrm7SPAQy1Fm80r+YpplwIWJ7s
-59mlh3lfJbzwa6Mej92TmXh35EiV3ImOBdTx8Y7LIdHS2m6YmxxZYiDgDIc//027
-/Vrt9RLw5cYgJKvFWhmvPLAX44naMd+fNQENa8e+DP6tAgMBAAE=
------END PUBLIC KEY-----
-"@
-$script:NewReleasePublicKeyPem = @"
+$script:ReleasePublicKeyPem = @"
 -----BEGIN PUBLIC KEY-----
 MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAnyBHAJkNHa0jLqrilDuO
 8V5m3kgqEKuNg87kGYui6oleXj0wcxTtH7lsskSSIoTGw/rbvYmYthB7LCM6K0Fl
@@ -101,12 +88,7 @@ function Test-ManifestSignature {
         [byte[]]$ManifestBytes,
         [byte[]]$SignatureBytes,
         [string[]]$PublicKeysPem = $(
-            if ($env:MPAKA_CLI_TEST_PUBLIC_KEY_PEM) {
-                @($env:MPAKA_CLI_TEST_PUBLIC_KEY_PEM)
-                if ($env:MPAKA_CLI_TEST_FALLBACK_PUBLIC_KEY_PEM) { @($env:MPAKA_CLI_TEST_FALLBACK_PUBLIC_KEY_PEM) }
-            } else {
-                @($script:OldReleasePublicKeyPem, $script:NewReleasePublicKeyPem)
-            }
+            if ($env:MPAKA_CLI_TEST_PUBLIC_KEY_PEM) { @($env:MPAKA_CLI_TEST_PUBLIC_KEY_PEM) } else { @($script:ReleasePublicKeyPem) }
         )
     )
     $verified = $false

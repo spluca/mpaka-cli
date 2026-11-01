@@ -49,25 +49,37 @@ in the `verify` environment, which holds no secrets. The release workflow uses
 these protected values:
 
 - Secret `MPAKA_CLI_RELEASE_SIGNING_KEY`: PEM private RSA-3072 key generated
-  outside Git and never printed or committed.
+  outside Git and never printed or committed. Its public half must be the
+  single `RELEASE_PUBLIC_KEY_PEM` embedded in `src/distribution.rs`, `install`,
+  and `install.ps1` (SPKI SHA-256
+  `0f0d2394b0c44b13adaa78bb4b913fc989813fe6c2fa85fdd9f6e20bd043b9fc`). Tag
+  builds fail before publishing if the secret does not match.
 - Secret `MPAKA_CLI_CLOUDFLARE_API_TOKEN`: scoped to deploy the distribution
   Worker and write the `mpaka-cli-releases` bucket.
 - Variable `MPAKA_CLI_CLOUDFLARE_ACCOUNT_ID`: the Cloudflare account ID.
 
 Pull requests generate a temporary test key and never publish. A production
 publication occurs only for an annotated `vMAJOR.MINOR.PATCH` tag matching the
-workspace version.
+workspace version. The `release` environment admits only `v*` tag refs, so any
+workflow that needs those secrets must run from a tag; a run from a branch is
+rejected before it starts.
 
 ## Release and rollback
 
 The tag workflow builds and smoke-tests all six targets, signs the exact
 `manifest.json` bytes, publishes `releases/<version>/`, verifies every public
-object, and only then writes `latest-v2`. It must never advance `latest` beyond
-v0.2.0.
+object, writes `latest-v2`, and publishes `install` and `install.ps1` last. The
+installers trust only the active key, so they must never be published before
+`latest-v2` names a release they can verify. The workflow also refuses any tag
+older than `v0.3.0` or older than the current public `latest-v2`, so a re-run of
+a superseded tag cannot roll the pointer backward. It must never advance
+`latest` beyond v0.2.0.
 
-To roll back, choose an already published version and update only the R2
-`latest-v2` object to that exact `vX.Y.Z` line. Do not change `latest`, and do
-not overwrite or delete the version prefix. Then run:
+To roll back, choose an already published version from v0.3.0 onward and
+update only the R2 `latest-v2` object to that exact `vX.Y.Z` line. Never point
+`latest-v2` at v0.2.0 or earlier: those manifests are signed by the retired
+key, which v0.3.0 and later clients reject. Do not change `latest`, and do not
+overwrite or delete the version prefix. Then run:
 
 ```bash
 MPAKA_CLI_LEGACY_PUBLIC_KEY_FILE=/secure/path/mpaka-old-release-public.pem \
@@ -81,9 +93,34 @@ the Worker/R2 or Access change before attempting another rollback.
 
 ## Key rotation
 
-The v0.2.0 bridge accepts the old and new RSA-3072 public keys but is signed by
-the old key, allowing v0.1.0 to install it. Both bridge pointers initially name
-v0.2.0. The v0.3.0 release is signed by and trusts only the new key, advances
-only `latest-v2`, and leaves `latest` on v0.2.0 permanently. Delete the old
-secret only after a disposable v0.1.0 binary has updated through v0.2.0 to
-v0.3.0 and public acceptance passes with both public keys.
+The original release key was retired in two steps:
+
+1. The v0.2.0 bridge trusts the old and new RSA-3072 public keys but is signed
+   by the old key, so v0.1.0 can install it. It is published once, and
+   `latest` stays on v0.2.0 permanently.
+2. v0.3.0 and later trust only the new key (fingerprint above), are signed with
+   it by the normal tag pipeline, and advance only `latest-v2`.
+
+A v0.1.0 client therefore needs two updates: `latest` takes it to the v0.2.0
+bridge, and `latest-v2` takes it to the current release. An explicit update
+from v0.1.0 straight to v0.3.0 or later is rejected by design. The retired
+key's public half and one manifest it signed are kept under
+`tests/fixtures/retired-key/` so the CLI and both installers keep proving they
+reject it.
+
+Delete the retired private key from every secret store only after a disposable
+v0.1.0 binary has updated through v0.2.0 to v0.3.0 and public acceptance passes
+with both public keys.
+
+A future rotation repeats this pattern, but it needs a **new pointer**, because
+v0.3.0 and later clients read `latest-v2` and would otherwise skip the bridge
+and reject it:
+
+1. Ship a bridge release that trusts the current and next key and is signed by
+   the current key, then freeze `latest-v2` on that bridge forever.
+2. Ship the next release trusting only the new key, and advance a fresh
+   `latest-v3` pointer that the new clients and installers read.
+
+Freezing the old pointer is what lets a dormant client cross the rotation in
+two updates. Never repoint a frozen pointer at a release its clients cannot
+verify.
