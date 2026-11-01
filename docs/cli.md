@@ -66,6 +66,18 @@ that bridge to the current `latest-v2` release. Do not try to jump directly
 from v0.1.0 to a later explicit version; the old client correctly rejects the
 new signing key.
 
+On Linux and macOS, `mpaka self-update` in v0.2.0 and earlier replaces the
+binary without its executable permission, so the updated `mpaka` fails with
+`permission denied`. If you update from one of those versions, restore the
+permission after each self-update:
+
+```bash
+chmod +x ~/.local/bin/mpaka
+```
+
+Alternatively, rerun the installer, which always installs an executable
+binary. Updates that start from a later release keep the permission.
+
 If a current release must be withdrawn, the operator moves `latest-v2` back to
 an already published known-good version. Existing immutable versions remain
 available for pinned installs and rollback.
