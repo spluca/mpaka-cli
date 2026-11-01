@@ -172,6 +172,7 @@ pub fn replace_executable_atomically(
         io::copy(&mut source, &mut destination)?;
         destination.sync_all()?;
         drop(destination);
+        set_executable_mode(&temporary)?;
         fs::rename(&temporary, current)
             .map_err(|error| UpdateError::Replacement(error.to_string()))?;
         Ok(())
@@ -549,6 +550,26 @@ mod tests {
         fs::write(&replacement, b"new executable").expect("replacement");
         replace_executable_atomically(&current, &replacement).expect("replace");
         assert_eq!(fs::read(&current).expect("updated"), b"new executable");
+        fs::remove_file(replacement).expect("cleanup replacement");
+        fs::remove_file(current).expect("cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replaced_executable_keeps_the_executable_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let current = unique_path("mode-current");
+        let replacement = unique_path("mode-new");
+        fs::write(&current, b"old executable").expect("current");
+        fs::write(&replacement, b"new executable").expect("replacement");
+        set_executable_mode(&current).expect("current mode");
+        set_executable_mode(&replacement).expect("replacement mode");
+        replace_executable_atomically(&current, &replacement).expect("replace");
+        let mode = fs::metadata(&current)
+            .expect("updated")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o755);
         fs::remove_file(replacement).expect("cleanup replacement");
         fs::remove_file(current).expect("cleanup");
     }
