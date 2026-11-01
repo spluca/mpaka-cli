@@ -1,0 +1,4 @@
+# Signature fixtures prove that a specific byte sequence verifies, so they must
+# check out byte-for-byte everywhere. Without this, Git for Windows rewrites
+# manifest.json with CRLF and its valid signature stops verifying.
+/tests/fixtures/** -text
