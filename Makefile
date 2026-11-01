@@ -1,4 +1,4 @@
-.PHONY: help build test clippy fmt release-test installer-test powershell-test workflow-test docs-test public-acceptance-test public-acceptance check
+.PHONY: help build test clippy fmt release-test installer-test powershell-test workflow-test docs-test fixture-test public-acceptance-test public-acceptance check
 
 help:
 	@printf '%s\n' \
@@ -11,6 +11,7 @@ help:
 		'make powershell-test   Test the PowerShell installer' \
 		'make workflow-test     Check the release workflow contract' \
 		'make docs-test         Check the CLI documentation contract' \
+		'make fixture-test      Check test fixtures carry no private keys' \
 		'make public-acceptance-test Test the public topology assertions' \
 		'make public-acceptance Verify the public distribution endpoint' \
 		'make check             Run every local check'
@@ -47,10 +48,14 @@ workflow-test:
 docs-test:
 	bash scripts/cli-docs-test.sh
 
+fixture-test:
+	bash scripts/fixture-hygiene-test.sh
+	shellcheck scripts/fixture-hygiene-test.sh
+
 public-acceptance-test:
 	bash scripts/cli-public-acceptance-test.sh
 
 public-acceptance:
 	bash scripts/cli-public-acceptance.sh
 
-check: fmt test clippy release-test installer-test powershell-test workflow-test docs-test public-acceptance-test
+check: fmt test clippy release-test installer-test powershell-test workflow-test docs-test fixture-test public-acceptance-test

@@ -4,18 +4,7 @@ set -Eeuo pipefail
 readonly INSTALLER_NAME="mpaka installer"
 readonly DEFAULT_BASE_URL="https://cli.mpaka.dev"
 INSTALL_TEMP_DIR=''
-readonly OLD_RELEASE_PUBLIC_KEY_PEM="-----BEGIN PUBLIC KEY-----
-MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAj4+ezaZgsT5NlaDScaKn
-oxXg+CjSmYQLRxe6zHFZTkAj668hHFlgWX7zrYlxLy9qSb29uj4JyBLyCISZOdye
-FumDXOZOiVwVl2HDINiaWAAHzRSC7Jm21MZ5DYR6fV2gm50Rm+r8DO72OhlQqH/T
-R5UKnUN8YxnlJZoVb73PqxFnwpYN7E0Cuc8D0VI47Vor06gdvTTaXCY+L7+UlT/H
-kcd2UeMkBQcYtusdqvBn1hVeIg3UYQL2QoaN5DNTHtGg5Xoj3FtaJt5QFWqO/hUs
-DAb3IvFxwWkik9kbLpMhuN5RQlMHOXmZPDIkl49thFw6FHgCYPUiUYC+XBOkOzTv
-KzvrwcFabuosV7Sw/Mg1F8hSsdrfnWSphXPvHukrm7SPAQy1Fm80r+YpplwIWJ7s
-59mlh3lfJbzwa6Mej92TmXh35EiV3ImOBdTx8Y7LIdHS2m6YmxxZYiDgDIc//027
-/Vrt9RLw5cYgJKvFWhmvPLAX44naMd+fNQENa8e+DP6tAgMBAAE=
------END PUBLIC KEY-----"
-readonly NEW_RELEASE_PUBLIC_KEY_PEM="-----BEGIN PUBLIC KEY-----
+readonly RELEASE_PUBLIC_KEY_PEM="-----BEGIN PUBLIC KEY-----
 MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAnyBHAJkNHa0jLqrilDuO
 8V5m3kgqEKuNg87kGYui6oleXj0wcxTtH7lsskSSIoTGw/rbvYmYthB7LCM6K0Fl
 JyPAawnP6SEYd0vXfU8PPpuQpgmnSKrVOtt1Xn/d/5eeu5Izgfx9qyamozyAhtKo
@@ -92,30 +81,12 @@ sha256_file() {
 }
 
 verify_manifest_signature() {
-  local manifest="$1" signature="$2" key_dir="$3" index=0 key_file key_pem
-  local -a trusted_keys key_files=()
-  if [[ -n "${MPAKA_CLI_TEST_PUBLIC_KEY_PEM:-}" ]]; then
-    trusted_keys=("$MPAKA_CLI_TEST_PUBLIC_KEY_PEM")
-    if [[ -n "${MPAKA_CLI_TEST_FALLBACK_PUBLIC_KEY_PEM:-}" ]]; then
-      trusted_keys+=("$MPAKA_CLI_TEST_FALLBACK_PUBLIC_KEY_PEM")
-    fi
-  else
-    trusted_keys=("$OLD_RELEASE_PUBLIC_KEY_PEM" "$NEW_RELEASE_PUBLIC_KEY_PEM")
-  fi
-  for key_pem in "${trusted_keys[@]}"; do
-    key_file="$key_dir/public-$index.pem"
-    printf '%s\n' "$key_pem" > "$key_file"
-    chmod 0600 "$key_file"
-    openssl pkey -pubin -in "$key_file" -noout >/dev/null 2>&1 || return 1
-    key_files+=("$key_file")
-    index=$((index + 1))
-  done
-  for key_file in "${key_files[@]}"; do
-    if openssl dgst -sha256 -verify "$key_file" -signature "$signature" "$manifest" >/dev/null 2>&1; then
-      return 0
-    fi
-  done
-  return 1
+  local manifest="$1" signature="$2" key_dir="$3"
+  local key_file="$key_dir/public.pem"
+  printf '%s\n' "${MPAKA_CLI_TEST_PUBLIC_KEY_PEM:-$RELEASE_PUBLIC_KEY_PEM}" > "$key_file"
+  chmod 0600 "$key_file"
+  openssl pkey -pubin -in "$key_file" -noout >/dev/null 2>&1 || return 1
+  openssl dgst -sha256 -verify "$key_file" -signature "$signature" "$manifest" >/dev/null 2>&1
 }
 
 main() {

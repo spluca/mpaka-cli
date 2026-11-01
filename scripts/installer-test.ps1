@@ -42,6 +42,14 @@ try {
     $untrusted.Dispose()
 }
 
+$retired = Join-Path $PSScriptRoot '..' 'tests' 'fixtures' 'retired-key'
+$retiredManifest = [IO.File]::ReadAllBytes((Join-Path $retired 'manifest.json'))
+$retiredSignature = [IO.File]::ReadAllBytes((Join-Path $retired 'manifest.json.sig'))
+$retiredPem = [IO.File]::ReadAllText((Join-Path $retired 'public.pem'))
+Assert-Equal $true (Test-ManifestSignature -ManifestBytes $retiredManifest -SignatureBytes $retiredSignature -PublicKeysPem @($retiredPem)) 'retired-key fixture validity'
+Remove-Item Env:MPAKA_CLI_TEST_PUBLIC_KEY_PEM -ErrorAction SilentlyContinue
+Assert-Equal $false (Test-ManifestSignature -ManifestBytes $retiredManifest -SignatureBytes $retiredSignature) 'retired-key signature rejection'
+
 if ((Get-Command Get-FileHash -ErrorAction SilentlyContinue) -eq $null) {
     throw 'Get-FileHash is required'
 }

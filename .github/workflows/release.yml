@@ -1,14 +1,6 @@
 name: mPaka CLI release
 
 on:
-  workflow_dispatch:
-    inputs:
-      bridge_version:
-        description: Exact compatibility bridge version to prepare without publishing
-        required: true
-        type: choice
-        options:
-          - 'v0.2.0'
   pull_request:
   push:
     branches:
@@ -53,6 +45,7 @@ jobs:
           make powershell-test
           make workflow-test
           make docs-test
+          make fixture-test
       - name: Check distribution Worker
         working-directory: cli-distribution
         run: |
@@ -164,7 +157,7 @@ jobs:
     needs: [build, powershell-installer]
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, X64, rustbox-cli]
-    environment: ${{ github.event_name == 'push' && github.ref_type == 'tag' && github.ref_name != 'v0.2.0' && 'release' || 'verify' }}
+    environment: ${{ github.event_name == 'push' && github.ref_type == 'tag' && 'release' || 'verify' }}
     env:
       CLI_PUBLIC_BASE_URL: https://cli.mpaka.dev
     steps:
@@ -188,14 +181,11 @@ jobs:
       - name: Generate and verify release
         shell: bash
         env:
-          CLI_RELEASE_SIGNING_KEY: ${{ github.event_name == 'push' && github.ref_type == 'tag' && github.ref_name != 'v0.2.0' && secrets.MPAKA_CLI_RELEASE_SIGNING_KEY || '' }}
+          CLI_RELEASE_SIGNING_KEY: ${{ github.event_name == 'push' && github.ref_type == 'tag' && secrets.MPAKA_CLI_RELEASE_SIGNING_KEY || '' }}
         run: |
           set -Eeuo pipefail
           version='v0.0.0'
-          if [[ "${GITHUB_EVENT_NAME:-}" == workflow_dispatch ]]; then
-            version='${{ inputs.bridge_version }}'
-            test "$version" = v0.2.0
-          elif [[ "${GITHUB_REF_TYPE:-}" == tag ]]; then
+          if [[ "${GITHUB_REF_TYPE:-}" == tag ]]; then
             version="$GITHUB_REF_NAME"
           fi
           [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
@@ -216,13 +206,25 @@ jobs:
             cp "raw/mpaka-$target" "$work/input/mpaka-$target"
           done
           scripts/cli-release.sh package --version "$version" --input-dir "$work/input" --output-dir "$work/artifacts"
-          if [[ "${GITHUB_EVENT_NAME:-}" == push && "${GITHUB_REF_TYPE:-}" == tag && "$version" != v0.2.0 ]]; then
+          if [[ "${GITHUB_EVENT_NAME:-}" == push && "${GITHUB_REF_TYPE:-}" == tag ]]; then
             test -n "$CLI_RELEASE_SIGNING_KEY"
-            printf '%s\n' "$CLI_RELEASE_SIGNING_KEY" > "$work/signing-key.pem"
+            trap 'rm -f "$work/signing-key.pem"' EXIT
+            (umask 077 && printf '%s\n' "$CLI_RELEASE_SIGNING_KEY" > "$work/signing-key.pem")
           else
             openssl genrsa 2048 2>/dev/null > "$work/signing-key.pem"
           fi
           openssl rsa -in "$work/signing-key.pem" -pubout -out "$work/public.pem" 2>/dev/null
+          if [[ "${GITHUB_EVENT_NAME:-}" == push && "${GITHUB_REF_TYPE:-}" == tag ]]; then
+            sed -n '/^readonly RELEASE_PUBLIC_KEY_PEM="/,/END PUBLIC KEY/p' install \
+              | sed 's/^readonly RELEASE_PUBLIC_KEY_PEM="//; s/"$//' > "$work/embedded-public.pem"
+            embedded="$(openssl pkey -pubin -in "$work/embedded-public.pem" -outform DER | sha256sum | cut -d' ' -f1)"
+            derived="$(openssl pkey -pubin -in "$work/public.pem" -outform DER | sha256sum | cut -d' ' -f1)"
+            if [[ "$embedded" != "$derived" ]]; then
+              rm -f "$work/signing-key.pem"
+              echo "release signing key does not match the embedded public key" >&2
+              exit 1
+            fi
+          fi
           scripts/cli-release.sh manifest --version "$version" --artifact-dir "$work/artifacts" --output-dir "$work/release" --signing-key "$work/signing-key.pem"
           rm -f "$work/signing-key.pem"
           scripts/cli-release.sh verify --version "$version" --release-dir "$work/release" --public-key "$work/public.pem"
@@ -231,39 +233,41 @@ jobs:
           echo "MPAKA_RELEASE_VERSION=$version" >> "$GITHUB_ENV"
           echo "MPAKA_RELEASE_DIR=$work/release" >> "$GITHUB_ENV"
           echo "MPAKA_RELEASE_MANIFEST_SHA256=$(awk '{print $1}' "$work/manifest.sha256")" >> "$GITHUB_ENV"
-          if [[ "${GITHUB_EVENT_NAME:-}" == workflow_dispatch ]]; then
-            prepared="$RUNNER_TEMP/mpaka-cli-v0.2.0-prepared"
-            mkdir -p "$prepared"
-            rm -f "$work/release/manifest.json.sig"
-            cp "$work/release"/* "$prepared/"
-            cp install install.ps1 "$prepared/"
-            printf '%s\n' "$GITHUB_SHA" > "$prepared/source-commit"
-            awk '{print $1}' "$work/manifest.sha256" > "$prepared/manifest.sha256"
-            test -z "$(find "$prepared" -maxdepth 1 -type f \( -name '*.pem' -o -name '*.sig' \) -print -quit)"
-            echo "MPAKA_BRIDGE_PREPARED_DIR=$prepared" >> "$GITHUB_ENV"
+      - name: Refuse release versions that would regress the active pointer
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        shell: bash
+        env:
+          MINIMUM_ACTIVE_VERSION: v0.3.0
+        run: |
+          set -Eeuo pipefail
+          not_older_than() {
+            [[ "$1" == "$2" ]] && return 0
+            [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" == "$2" ]]
+          }
+          if ! not_older_than "$MPAKA_RELEASE_VERSION" "$MINIMUM_ACTIVE_VERSION"; then
+            echo "$MPAKA_RELEASE_VERSION predates $MINIMUM_ACTIVE_VERSION and is signed by the retired key" >&2
+            exit 1
           fi
-      - name: Upload exact v0.2.0 prepared bundle
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: mpaka-cli-v0.2.0-prepared
-          path: ${{ env.MPAKA_BRIDGE_PREPARED_DIR }}
-          if-no-files-found: error
-          retention-days: 7
+          current="$(curl --silent --show-error --fail --proto '=https' --proto-redir '=https' "$CLI_PUBLIC_BASE_URL/latest-v2" | tr -d '\r\n' || true)"
+          if [[ "$current" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && ! not_older_than "$MPAKA_RELEASE_VERSION" "$current"; then
+            echo "refusing to move latest-v2 backward from $current to $MPAKA_RELEASE_VERSION" >&2
+            exit 1
+          fi
+
       - name: Prepare Worker dependencies
         working-directory: cli-distribution
         run: |
           corepack enable
           pnpm install --frozen-lockfile
       - name: Deploy distribution Worker on production tags
-        if: github.event_name == 'push' && github.ref_type == 'tag' && github.ref_name != 'v0.2.0'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         working-directory: cli-distribution
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.MPAKA_CLI_CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.MPAKA_CLI_CLOUDFLARE_ACCOUNT_ID }}
         run: pnpm exec wrangler deploy
       - name: Publish immutable release prefix
-        if: github.event_name == 'push' && github.ref_type == 'tag' && github.ref_name != 'v0.2.0'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.MPAKA_CLI_CLOUDFLARE_API_TOKEN }}
@@ -281,11 +285,8 @@ jobs:
               pnpm --dir cli-distribution exec wrangler r2 object put "mpaka-cli-releases/$prefix/$name" --file "$file" --remote --content-type "application/octet-stream"
             done
           fi
-          for installer in install install.ps1; do
-            pnpm --dir cli-distribution exec wrangler r2 object put "mpaka-cli-releases/$installer" --file "$GITHUB_WORKSPACE/$installer" --remote --content-type "text/plain; charset=utf-8"
-          done
-      - name: Verify public release before latest pointer
-        if: github.event_name == 'push' && github.ref_type == 'tag' && github.ref_name != 'v0.2.0'
+      - name: Verify public release before latest-v2 pointer
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -296,7 +297,7 @@ jobs:
             cmp --silent "$file" "$RUNNER_TEMP/public-$name"
           done
       - name: Update latest-v2 pointer after public verification
-        if: github.event_name == 'push' && github.ref_type == 'tag' && github.ref_name != 'v0.2.0'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.MPAKA_CLI_CLOUDFLARE_API_TOKEN }}
@@ -306,6 +307,20 @@ jobs:
           printf '%s\n' "$MPAKA_RELEASE_VERSION" > "$RUNNER_TEMP/latest-v2"
           pnpm --dir cli-distribution exec wrangler r2 object put "mpaka-cli-releases/latest-v2" --file "$RUNNER_TEMP/latest-v2" --remote --content-type "text/plain; charset=utf-8"
           test "$(curl --silent --show-error --fail --proto '=https' --proto-redir '=https' "$CLI_PUBLIC_BASE_URL/latest-v2" | tr -d '\r\n')" = "$MPAKA_RELEASE_VERSION"
+      - name: Publish installers after the pointer they verify
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.MPAKA_CLI_CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.MPAKA_CLI_CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -Eeuo pipefail
+          for installer in install install.ps1; do
+            pnpm --dir cli-distribution exec wrangler r2 object put "mpaka-cli-releases/$installer" --file "$GITHUB_WORKSPACE/$installer" --remote --content-type "text/plain; charset=utf-8"
+            curl --silent --show-error --fail --proto '=https' --proto-redir '=https' "$CLI_PUBLIC_BASE_URL/$installer" --output "$RUNNER_TEMP/public-$installer"
+          done
+          cmp --silent "$GITHUB_WORKSPACE/install" "$RUNNER_TEMP/public-install"
+          cmp --silent "$GITHUB_WORKSPACE/install.ps1" "$RUNNER_TEMP/public-install.ps1"
           {
             echo "### mPaka CLI release"
             echo "- version: $MPAKA_RELEASE_VERSION"
