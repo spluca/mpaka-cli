@@ -11,7 +11,7 @@ pub struct AuthClient {
     endpoint: Url,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Identity {
     pub user_id: String,
     pub email: String,
@@ -711,6 +711,25 @@ mod tests {
             client.me(&Session::from_token("expired")).await,
             Err(ClientError::InvalidSession)
         ));
+    }
+
+    #[test]
+    fn serializes_identity_for_json_output() {
+        let identity = Identity {
+            user_id: "user-1".into(),
+            email: "alice@example.com".into(),
+            tenant_id: "tenant-1".into(),
+            tenant_name: "Example".into(),
+            role: "owner".into(),
+        };
+
+        let value = serde_json::to_value(identity).expect("identity JSON");
+
+        assert_eq!(value["user_id"], "user-1");
+        assert_eq!(value["email"], "alice@example.com");
+        assert_eq!(value["tenant_id"], "tenant-1");
+        assert_eq!(value["tenant_name"], "Example");
+        assert_eq!(value["role"], "owner");
     }
 
     #[tokio::test]
