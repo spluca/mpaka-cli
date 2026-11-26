@@ -4,7 +4,9 @@ mod session;
 mod update;
 
 use clap::{Args, Parser, Subcommand};
-use client::{AuthClient, ClientError, ExecutionRequest, ExecutionResponse, Identity};
+use client::{
+    AuthClient, ClientError, ExecutionRequest, ExecutionResponse, ExecutionSummary, Identity,
+};
 use session::{SessionError, SessionStore};
 use std::{
     fmt,
@@ -50,12 +52,19 @@ struct Cli {
 enum Command {
     Register(AuthArgs),
     Login(AuthArgs),
-    Whoami,
+    Whoami(OutputArgs),
     Logout,
     Run(RunArgs),
     SelfUpdate(SelfUpdateArgs),
     #[command(subcommand)]
     Executions(ExecutionsCommand),
+    #[command(subcommand)]
+    Environments(EnvironmentsCommand),
+    Limits(OutputArgs),
+    Quota(OutputArgs),
+    Usage(UsageArgs),
+    #[command(subcommand)]
+    ApiKeys(ApiKeysCommand),
     #[cfg(windows)]
     #[command(name = "__mpaka-update-helper", hide = true)]
     UpdateHelper(UpdateHelperArgs),
@@ -63,13 +72,108 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum ExecutionsCommand {
-    List(ExecutionOutputArgs),
+    List(ExecutionListArgs),
     Get(ExecutionIdArgs),
     Cancel(ExecutionIdArgs),
+    Wait(WaitExecutionArgs),
 }
 
 #[derive(Debug, Args)]
-struct ExecutionOutputArgs {
+struct ExecutionListArgs {
+    #[arg(long)]
+    json: bool,
+    #[arg(long, default_value_t = 1)]
+    page: u32,
+    #[arg(long, default_value_t = 25)]
+    page_size: u32,
+    #[arg(long)]
+    status: Option<String>,
+    #[arg(long)]
+    language: Option<String>,
+    #[arg(long)]
+    query: Option<String>,
+    #[arg(long)]
+    created_on: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct WaitExecutionArgs {
+    id: String,
+    #[arg(long, default_value_t = 60_000)]
+    wait_timeout_ms: u64,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Subcommand)]
+enum EnvironmentsCommand {
+    Create(EnvironmentCreateArgs),
+    List(OutputArgs),
+    Get(EnvironmentIdArgs),
+    Wait(WaitEnvironmentArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum ApiKeysCommand {
+    List(OutputArgs),
+    Create(ApiKeyCreateArgs),
+    Rotate(ApiKeyIdArgs),
+    Delete(ApiKeyIdArgs),
+}
+
+#[derive(Debug, Args)]
+struct ApiKeyCreateArgs {
+    #[arg(long)]
+    name: String,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct ApiKeyIdArgs {
+    id: String,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct EnvironmentCreateArgs {
+    #[arg(long)]
+    requirements: PathBuf,
+    #[arg(long)]
+    idempotency_key: Option<String>,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct EnvironmentIdArgs {
+    id: String,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct WaitEnvironmentArgs {
+    id: String,
+    #[arg(long, default_value_t = 60_000)]
+    wait_timeout_ms: u64,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct OutputArgs {
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct UsageArgs {
+    #[arg(long, default_value = "30d")]
+    period: String,
+    #[arg(long, default_value = "day")]
+    group_by: String,
     #[arg(long)]
     json: bool,
 }
@@ -97,8 +201,20 @@ struct RunArgs {
     stdin: bool,
     #[arg(long, default_value_t = DEFAULT_TIMEOUT_MS)]
     timeout_ms: u64,
-    #[arg(long, default_value_t = DEFAULT_MEMORY_MB)]
-    memory_mb: u64,
+    #[arg(long)]
+    memory_mb: Option<u64>,
+    #[arg(long, conflicts_with = "memory_mb")]
+    memory_profile: Option<String>,
+    #[arg(long, conflicts_with = "vcpu_count")]
+    cpu_profile: Option<String>,
+    #[arg(long, conflicts_with = "cpu_profile")]
+    vcpu_count: Option<u8>,
+    #[arg(long)]
+    environment: Option<Uuid>,
+    #[arg(long = "async")]
+    asynchronous: bool,
+    #[arg(long)]
+    json: bool,
     #[arg(long, value_name = "KEY")]
     idempotency_key: Option<String>,
     #[arg(long, default_value_t = DEFAULT_MAX_POLL_ATTEMPTS, value_parser = parse_positive_usize)]
@@ -193,21 +309,44 @@ async fn main() {
 }
 
 async fn run(cli: Cli) -> Result<(), CliError> {
-    let store = SessionStore::from_environment()?;
+    let store = SessionStore::from_environment_for_endpoint(&cli.endpoint)?;
     let client = AuthClient::new(&cli.endpoint)?;
     match cli.command {
         Command::Register(args) => authenticate(&client, &store, args, true).await?,
         Command::Login(args) => authenticate(&client, &store, args, false).await?,
-        Command::Whoami => {
+        Command::Whoami(args) => {
             let identity = client.me(&store.load()?).await?;
-            print_identity(&identity, false);
+            if args.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&identity)
+                        .map_err(|_| ClientError::InvalidResponse)?
+                );
+            } else {
+                print_identity(&identity, false);
+            }
         }
         Command::Logout => {
             client.logout(&store.load()?).await?;
             store.remove()?;
-            println!("Successfully signed out.");
+            eprintln!("Successfully signed out.");
         }
         Command::Run(args) => run_execution(&client, args).await?,
+        Command::Environments(command) => run_environments(&client, command).await?,
+        Command::Limits(args) => print_api_value(
+            client
+                .get_api_json(&execution_api_key()?, "/v1/limits")
+                .await?,
+            args.json,
+        )?,
+        Command::Quota(args) => print_api_value(
+            client
+                .get_api_json(&execution_api_key()?, "/v1/quota")
+                .await?,
+            args.json,
+        )?,
+        Command::Usage(args) => run_usage(&client, args).await?,
+        Command::ApiKeys(command) => run_api_keys(&client, &store, command).await?,
         Command::SelfUpdate(args) => {
             let result = update::self_update(UpdateRequest {
                 version: args.version,
@@ -245,7 +384,14 @@ async fn run_execution(client: &AuthClient, args: RunArgs) -> Result<(), CliErro
         language: "python".into(),
         code: source,
         timeout_ms: args.timeout_ms,
-        memory_mb: args.memory_mb,
+        memory_mb: args
+            .memory_profile
+            .is_none()
+            .then(|| args.memory_mb.unwrap_or(DEFAULT_MEMORY_MB)),
+        vcpu_count: args.vcpu_count,
+        cpu_profile: args.cpu_profile,
+        memory_profile: args.memory_profile,
+        environment_id: args.environment,
     };
     let (idempotency_key, generated) = resolve_idempotency_key(args.idempotency_key);
     if generated {
@@ -254,8 +400,21 @@ async fn run_execution(client: &AuthClient, args: RunArgs) -> Result<(), CliErro
     let execution = client
         .create_execution(&api_key, &request, &idempotency_key)
         .await?;
+    if args.asynchronous {
+        if args.json {
+            println!("{}", render_execution_json(&execution)?);
+        } else {
+            println!("Execution: {}", execution.id);
+            println!("Status: {}", execution.status);
+        }
+        return Ok(());
+    }
     let execution = poll_execution(client, &api_key, execution, args.max_poll_attempts).await?;
-    print_execution(&execution);
+    if args.json {
+        println!("{}", render_execution_json(&execution)?);
+    } else {
+        print_execution(&execution);
+    }
     classify_execution_result(&execution)
 }
 
@@ -274,15 +433,25 @@ async fn run_executions(client: &AuthClient, command: ExecutionsCommand) -> Resu
     let api_key = execution_api_key()?;
     match command {
         ExecutionsCommand::List(args) => {
-            let executions = client.list_executions(&api_key).await?;
+            let page = client
+                .list_executions(
+                    &api_key,
+                    args.page,
+                    args.page_size,
+                    args.status.as_deref(),
+                    args.language.as_deref(),
+                    args.query.as_deref(),
+                    args.created_on.as_deref(),
+                )
+                .await?;
             if args.json {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&executions)
+                    serde_json::to_string_pretty(&page)
                         .map_err(|_| ClientError::InvalidResponse)?
                 );
             } else {
-                print!("{}", render_execution_list(&executions));
+                print!("{}", render_execution_list(&page.items));
             }
         }
         ExecutionsCommand::Get(args) => {
@@ -295,6 +464,15 @@ async fn run_executions(client: &AuthClient, command: ExecutionsCommand) -> Resu
         }
         ExecutionsCommand::Cancel(args) => {
             let execution = client.cancel_execution(&api_key, &args.id).await?;
+            if args.json {
+                println!("{}", render_execution_json(&execution)?);
+            } else {
+                print_execution(&execution);
+            }
+        }
+        ExecutionsCommand::Wait(args) => {
+            let execution =
+                wait_execution(client, &api_key, &args.id, args.wait_timeout_ms).await?;
             if args.json {
                 println!("{}", render_execution_json(&execution)?);
             } else {
@@ -338,11 +516,280 @@ async fn poll_execution(
     unreachable!("positive max_poll_attempts is enforced by clap")
 }
 
+async fn wait_execution(
+    client: &AuthClient,
+    api_key: &str,
+    id: &str,
+    wait_timeout_ms: u64,
+) -> Result<ExecutionResponse, CliError> {
+    if wait_timeout_ms == 0 {
+        return Err(CliError::InvalidRunInput("wait timeout must be positive"));
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(wait_timeout_ms);
+    let mut execution = client.get_execution(api_key, id).await?;
+    while !is_terminal_status(&execution.status) {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(CliError::PollingTimeout {
+                id: execution.id,
+                status: execution.status,
+            });
+        }
+        tokio::time::sleep(POLL_INTERVAL.min(remaining)).await;
+        execution = client.get_execution(api_key, id).await?;
+    }
+    Ok(execution)
+}
+
+async fn run_environments(
+    client: &AuthClient,
+    command: EnvironmentsCommand,
+) -> Result<(), CliError> {
+    let api_key = execution_api_key()?;
+    match command {
+        EnvironmentsCommand::Create(args) => {
+            let requirements = read_requirements(&args.requirements)?;
+            let (key, generated) = resolve_idempotency_key(args.idempotency_key);
+            if generated {
+                eprintln!("{}", generated_idempotency_key_notice(&key));
+            }
+            let value = client
+                .post_api_json(
+                    &api_key,
+                    "/v1/environments",
+                    &serde_json::json!({"requirements": requirements}),
+                    &key,
+                )
+                .await?;
+            print_api_value(value, args.json)?;
+        }
+        EnvironmentsCommand::List(args) => {
+            print_api_value(
+                client.get_api_json(&api_key, "/v1/environments").await?,
+                args.json,
+            )?;
+        }
+        EnvironmentsCommand::Get(args) => {
+            let id = Uuid::parse_str(&args.id).map_err(|_| ClientError::InvalidId)?;
+            print_api_value(
+                client
+                    .get_api_json(&api_key, &format!("/v1/environments/{id}"))
+                    .await?,
+                args.json,
+            )?;
+        }
+        EnvironmentsCommand::Wait(args) => {
+            let id = Uuid::parse_str(&args.id).map_err(|_| ClientError::InvalidId)?;
+            let deadline =
+                tokio::time::Instant::now() + Duration::from_millis(args.wait_timeout_ms);
+            loop {
+                let value = client
+                    .get_api_json(&api_key, &format!("/v1/environments/{id}"))
+                    .await?;
+                let status = value
+                    .get("status")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown");
+                if matches!(status, "ready" | "failed" | "cancelled") {
+                    print_api_value(value, args.json)?;
+                    break;
+                }
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() {
+                    print_api_value(value, args.json)?;
+                    return Err(CliError::PollingTimeout {
+                        id: id.to_string(),
+                        status: status.to_owned(),
+                    });
+                }
+                tokio::time::sleep(POLL_INTERVAL.min(remaining)).await;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn read_requirements(path: &std::path::Path) -> Result<Vec<String>, CliError> {
+    let mut bytes = Vec::new();
+    fs::File::open(path)?
+        .take(32 * 201 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > 32 * 201 {
+        return Err(CliError::InvalidRunInput(
+            "requirements file exceeds the supported size",
+        ));
+    }
+    let source = String::from_utf8(bytes)
+        .map_err(|_| CliError::InvalidRunInput("requirements must be valid UTF-8"))?;
+    let requirements: Vec<String> = source
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect();
+    if requirements.is_empty()
+        || requirements.len() > 32
+        || requirements.iter().any(|line| line.len() > 200)
+    {
+        return Err(CliError::InvalidRunInput(
+            "requirements must contain 1 to 32 lines of at most 200 bytes",
+        ));
+    }
+    Ok(requirements)
+}
+
+async fn run_usage(client: &AuthClient, args: UsageArgs) -> Result<(), CliError> {
+    if args.group_by != "day" {
+        return Err(CliError::InvalidRunInput("usage group-by must be day"));
+    }
+    let days = args
+        .period
+        .strip_suffix('d')
+        .and_then(|value| value.parse::<u16>().ok())
+        .filter(|days| (1..=366).contains(days))
+        .ok_or(CliError::InvalidRunInput(
+            "usage period must be from 1d to 366d",
+        ))?;
+    let until_seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| CliError::InvalidRunInput("system clock is before Unix epoch"))?
+        .as_secs();
+    let since_seconds = until_seconds.saturating_sub(u64::from(days) * 86_400);
+    let path = format!(
+        "/v1/usage/summary?since={}&until={}&group_by=day",
+        unix_timestamp_to_rfc3339(since_seconds),
+        unix_timestamp_to_rfc3339(until_seconds),
+    );
+    let value = client.get_api_json(&execution_api_key()?, &path).await?;
+    print_api_value(value, args.json)
+}
+
+async fn run_api_keys(
+    client: &AuthClient,
+    store: &SessionStore,
+    command: ApiKeysCommand,
+) -> Result<(), CliError> {
+    let session = store.load()?;
+    match command {
+        ApiKeysCommand::List(args) => {
+            let keys = client
+                .get_session_api_json(&session, "/v1/api-keys")
+                .await?;
+            print_api_value(keys, args.json)?;
+        }
+        ApiKeysCommand::Create(args) => {
+            let key = client
+                .post_session_api_json(
+                    &session,
+                    "/v1/api-keys",
+                    &serde_json::json!({"name": args.name}),
+                )
+                .await?;
+            print_created_api_key(key, args.json)?;
+        }
+        ApiKeysCommand::Rotate(args) => {
+            validate_api_key_id(&args.id)?;
+            let path = format!("/v1/api-keys/{}/rotate", args.id);
+            let key = client
+                .post_session_api_json(&session, &path, &serde_json::json!({}))
+                .await?;
+            print_created_api_key(key, args.json)?;
+        }
+        ApiKeysCommand::Delete(args) => {
+            validate_api_key_id(&args.id)?;
+            let path = format!("/v1/api-keys/{}", args.id);
+            client.delete_session_api(&session, &path).await?;
+            if args.json {
+                println!(
+                    "{{\"deleted\":true,\"key_id\":{}}}",
+                    serde_json::to_string(&args.id).map_err(|_| ClientError::InvalidResponse)?
+                );
+            } else {
+                println!("Deleted API key {}.", args.id);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_api_key_id(id: &str) -> Result<(), CliError> {
+    let valid = id.strip_prefix("key_").is_some_and(|suffix| {
+        suffix.len() == 32 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+    });
+    if valid {
+        Ok(())
+    } else {
+        Err(CliError::InvalidRunInput(
+            "API key ID must have the form key_<32 hexadecimal characters>",
+        ))
+    }
+}
+
+fn print_created_api_key(value: serde_json::Value, json: bool) -> Result<(), CliError> {
+    eprintln!("This API key secret is shown only once. Store it securely.");
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&value).map_err(|_| ClientError::InvalidResponse)?
+        );
+    } else {
+        for name in ["key_id", "name", "token"] {
+            if let Some(field) = value.get(name) {
+                println!("{name}: {field}");
+            }
+        }
+        println!("Set MPAKA_API_KEY to the token value to run executions.");
+    }
+    Ok(())
+}
+
+fn print_api_value(value: serde_json::Value, json: bool) -> Result<(), CliError> {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&value).map_err(|_| ClientError::InvalidResponse)?
+        );
+    } else if let Some(object) = value.as_object() {
+        for (key, value) in object {
+            let rendered = if value.is_object() || value.is_array() {
+                serde_json::to_string(value).map_err(|_| ClientError::InvalidResponse)?
+            } else {
+                value
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| value.to_string())
+            };
+            println!("{key}: {rendered}");
+        }
+    } else {
+        println!("{}", value);
+    }
+    Ok(())
+}
+
+fn unix_timestamp_to_rfc3339(timestamp: u64) -> String {
+    let days = (timestamp / 86_400) as i64;
+    let seconds = timestamp % 86_400;
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let mut year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    year += if month <= 2 { 1 } else { 0 };
+    let hour = seconds / 3_600;
+    let minute = (seconds % 3_600) / 60;
+    let second = seconds % 60;
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
+}
+
 fn read_source(args: &RunArgs) -> Result<String, CliError> {
-    let mut source = String::new();
     match (&args.file, args.stdin) {
-        (Some(path), false) => fs::File::open(path)?.read_to_string(&mut source)?,
-        (None, true) => io::stdin().read_to_string(&mut source)?,
+        (Some(path), false) => read_bounded_source(fs::File::open(path)?),
+        (None, true) => read_bounded_source(io::stdin()),
         (None, false) => {
             return Err(CliError::InvalidRunInput(
                 "run requires --file <PATH> or --stdin",
@@ -353,12 +800,21 @@ fn read_source(args: &RunArgs) -> Result<String, CliError> {
                 "run accepts only one input source",
             ));
         }
-    };
+    }
+}
+
+fn read_bounded_source<R: Read>(reader: R) -> Result<String, CliError> {
+    let mut bytes = Vec::with_capacity(MAX_CODE_BYTES + 1);
+    reader
+        .take((MAX_CODE_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > MAX_CODE_BYTES {
+        return Err(CliError::InvalidRunInput("Python source exceeds 16 KiB"));
+    }
+    let source = String::from_utf8(bytes)
+        .map_err(|_| CliError::InvalidRunInput("Python source must be valid UTF-8"))?;
     if source.trim().is_empty() {
         return Err(CliError::InvalidRunInput("Python source cannot be empty"));
-    }
-    if source.len() > MAX_CODE_BYTES {
-        return Err(CliError::InvalidRunInput("Python source exceeds 16 KiB"));
     }
     Ok(source)
 }
@@ -391,6 +847,7 @@ fn print_execution(execution: &ExecutionResponse) {
     println!("Execution: {}", execution.id);
     println!("Status: {}", execution.status);
     println!("Mode: {}", execution.mode);
+    println!("vCPUs: {}", execution.vcpu_count);
     println!(
         "Exit code: {}",
         execution
@@ -409,7 +866,7 @@ fn print_execution(execution: &ExecutionResponse) {
     }
 }
 
-fn render_execution_list(executions: &[ExecutionResponse]) -> String {
+fn render_execution_list(executions: &[ExecutionSummary]) -> String {
     let mut output = String::new();
     for execution in executions {
         let _ = writeln!(
@@ -452,9 +909,9 @@ fn print_identity(identity: &Identity, registered: bool) {
     } else {
         "signed in"
     };
-    println!("Successfully {verb} as {}.", identity.email);
-    println!("Workspace: {}", identity.tenant_name);
-    println!("Role: {}", identity.role);
+    eprintln!("Successfully {verb} as {}.", identity.email);
+    eprintln!("Workspace: {}", identity.tenant_name);
+    eprintln!("Role: {}", identity.role);
 }
 
 fn read_password(from_stdin: bool) -> Result<String, CliError> {
@@ -527,6 +984,23 @@ mod tests {
     }
 
     #[test]
+    fn exposes_api_key_management_commands_and_validates_ids() {
+        assert!(Cli::try_parse_from(["mpaka", "api-keys", "list", "--json"]).is_ok());
+        assert!(Cli::try_parse_from(["mpaka", "api-keys", "create", "--name", "ci"]).is_ok());
+        assert!(
+            Cli::try_parse_from([
+                "mpaka",
+                "api-keys",
+                "rotate",
+                "key_0123456789abcdef0123456789abcdef"
+            ])
+            .is_ok()
+        );
+        assert!(validate_api_key_id("key_0123456789abcdef0123456789abcdef").is_ok());
+        assert!(validate_api_key_id("../latest").is_err());
+    }
+
+    #[test]
     fn exposes_execution_list_get_and_cancel_commands_with_json_output() {
         assert!(Cli::try_parse_from(["mpaka", "executions", "list"]).is_ok());
         assert!(Cli::try_parse_from(["mpaka", "executions", "list", "--json"]).is_ok());
@@ -553,7 +1027,13 @@ mod tests {
 
     #[test]
     fn renders_human_execution_list_rows() {
-        let output = render_execution_list(&[execution_fixture("completed")]);
+        let output = render_execution_list(&[ExecutionSummary {
+            id: "00000000-0000-0000-0000-000000000001".into(),
+            status: "completed".into(),
+            language: "python".into(),
+            created_at: "2026-10-28T10:00:00Z".into(),
+            finished_at: Some("2026-10-28T10:00:01Z".into()),
+        }]);
         assert!(output.contains("00000000-0000-0000-0000-000000000001"));
         assert!(output.contains("completed"));
         assert!(output.contains("python"));
@@ -595,6 +1075,7 @@ mod tests {
             language: "python".into(),
             timeout_ms: 3000,
             memory_mb: 128,
+            vcpu_count: 1,
             created_at: "2026-10-28T10:00:00Z".into(),
             finished_at: Some("2026-10-28T10:00:01Z".into()),
             stdout: "partial output\n".into(),
@@ -608,6 +1089,52 @@ mod tests {
     fn exposes_file_and_stdin_execution_inputs() {
         assert!(Cli::try_parse_from(["mpaka", "run", "--file", "script.py"]).is_ok());
         assert!(Cli::try_parse_from(["mpaka", "run", "--stdin"]).is_ok());
+    }
+
+    #[test]
+    fn exposes_async_wait_resource_and_environment_options() {
+        assert!(
+            Cli::try_parse_from([
+                "mpaka",
+                "run",
+                "--file",
+                "script.py",
+                "--async",
+                "--json",
+                "--cpu-profile",
+                "high_cpu",
+                "--memory-profile",
+                "high_memory",
+                "--environment",
+                "00000000-0000-0000-0000-000000000001"
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "mpaka",
+                "run",
+                "--file",
+                "script.py",
+                "--memory-profile",
+                "high_memory",
+                "--memory-mb",
+                "256"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "mpaka",
+                "executions",
+                "wait",
+                "00000000-0000-0000-0000-000000000001",
+                "--wait-timeout-ms",
+                "60000"
+            ])
+            .is_ok()
+        );
+        assert!(Cli::try_parse_from(["mpaka", "environments", "list", "--json"]).is_ok());
     }
 
     #[test]
@@ -693,7 +1220,13 @@ mod tests {
                 file: Some(path.clone()),
                 stdin: false,
                 timeout_ms: 3000,
-                memory_mb: 128,
+                memory_mb: Some(128),
+                memory_profile: None,
+                cpu_profile: None,
+                vcpu_count: None,
+                environment: None,
+                asynchronous: false,
+                json: false,
                 idempotency_key: None,
                 max_poll_attempts: DEFAULT_MAX_POLL_ATTEMPTS,
             })
@@ -701,6 +1234,15 @@ mod tests {
             "print(1)\n"
         );
         std::fs::remove_file(path).expect("remove script");
+    }
+
+    #[test]
+    fn bounds_python_source_reads_to_the_api_limit() {
+        assert!(read_bounded_source(std::io::Cursor::new(vec![b'x'; MAX_CODE_BYTES])).is_ok());
+        assert!(matches!(
+            read_bounded_source(std::io::Cursor::new(vec![b'x'; MAX_CODE_BYTES + 1])),
+            Err(CliError::InvalidRunInput(message)) if message.contains("16 KiB")
+        ));
     }
 
     #[test]
