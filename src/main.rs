@@ -5,7 +5,8 @@ mod update;
 
 use clap::{Args, Parser, Subcommand};
 use client::{
-    AuthClient, ClientError, ExecutionRequest, ExecutionResponse, ExecutionSummary, Identity,
+    AuthClient, ClientError, ExecutionListQuery, ExecutionRequest, ExecutionResponse,
+    ExecutionSummary, Identity,
 };
 use session::{SessionError, SessionStore};
 use std::{
@@ -436,12 +437,14 @@ async fn run_executions(client: &AuthClient, command: ExecutionsCommand) -> Resu
             let page = client
                 .list_executions(
                     &api_key,
-                    args.page,
-                    args.page_size,
-                    args.status.as_deref(),
-                    args.language.as_deref(),
-                    args.query.as_deref(),
-                    args.created_on.as_deref(),
+                    ExecutionListQuery {
+                        page: args.page,
+                        page_size: args.page_size,
+                        status: args.status.as_deref(),
+                        language: args.language.as_deref(),
+                        query: args.query.as_deref(),
+                        created_on: args.created_on.as_deref(),
+                    },
                 )
                 .await?;
             if args.json {
@@ -795,16 +798,12 @@ fn read_source(args: &RunArgs) -> Result<String, CliError> {
     match (&args.file, args.stdin) {
         (Some(path), false) => read_bounded_source(fs::File::open(path)?),
         (None, true) => read_bounded_source(io::stdin()),
-        (None, false) => {
-            return Err(CliError::InvalidRunInput(
-                "run requires --file <PATH> or --stdin",
-            ));
-        }
-        (Some(_), true) => {
-            return Err(CliError::InvalidRunInput(
-                "run accepts only one input source",
-            ));
-        }
+        (None, false) => Err(CliError::InvalidRunInput(
+            "run requires --file <PATH> or --stdin",
+        )),
+        (Some(_), true) => Err(CliError::InvalidRunInput(
+            "run accepts only one input source",
+        )),
     }
 }
 
