@@ -3,9 +3,9 @@
 [![mPaka CLI release](https://github.com/spluca/mpaka-cli/actions/workflows/release.yml/badge.svg)](https://github.com/spluca/mpaka-cli/actions/workflows/release.yml)
 
 `mpaka` is the command-line client for the [mPaka](https://mpaka.dev) code
-execution API. It handles account registration and login, submits code for
-remote execution, lists past executions, and updates itself from signed
-releases.
+execution API. It handles account registration and login, API keys, Python
+environments, resource profiles, asynchronous execution, usage and quotas, and
+signed releases.
 
 The CLI never runs submitted code locally: it only talks to the mPaka API.
 
