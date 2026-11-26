@@ -1,3 +1,4 @@
+use sha2::Digest;
 use std::{
     fmt,
     fs::{self, OpenOptions},
@@ -57,16 +58,39 @@ impl SessionStore {
         Self { path }
     }
 
-    pub fn from_environment() -> Result<Self, SessionError> {
+    pub fn from_environment_for_endpoint(endpoint: &str) -> Result<Self, SessionError> {
         let configured = std::env::var_os("RUSTBOX_SESSION_FILE");
         let home = std::env::var_os("HOME").map(PathBuf::from);
-        let path = Self::path_from_values(configured.as_deref().map(Path::new), home.as_deref());
+        let path = Self::path_for_endpoint_values(
+            configured.as_deref().map(Path::new),
+            home.as_deref(),
+            endpoint,
+        );
         if path.as_os_str().is_empty() {
             return Err(SessionError::MissingHome);
         }
         Ok(Self::new(path))
     }
 
+    fn path_for_endpoint_values(
+        configured: Option<&Path>,
+        home: Option<&Path>,
+        endpoint: &str,
+    ) -> PathBuf {
+        configured.map_or_else(
+            || {
+                let digest = sha2::Sha256::digest(endpoint.as_bytes());
+                home.map(|path| {
+                    path.join(".config/mpaka/sessions")
+                        .join(format!("{:x}", digest))
+                })
+                .unwrap_or_default()
+            },
+            Path::to_path_buf,
+        )
+    }
+
+    #[cfg(test)]
     fn path_from_values(configured: Option<&Path>, home: Option<&Path>) -> PathBuf {
         configured
             .map(Path::to_path_buf)
@@ -201,6 +225,15 @@ mod tests {
             SessionStore::path_from_values(None, Some(home)),
             Path::new("/home/tester/.config/mpaka/session")
         );
+    }
+
+    #[test]
+    fn stores_sessions_in_endpoint_specific_paths() {
+        let home = Path::new("/home/tester");
+        let first = SessionStore::path_for_endpoint_values(None, Some(home), "https://one.test");
+        let second = SessionStore::path_for_endpoint_values(None, Some(home), "https://two.test");
+        assert_ne!(first, second);
+        assert!(first.starts_with(home.join(".config/mpaka/sessions")));
     }
 
     #[test]
