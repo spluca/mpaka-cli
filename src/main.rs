@@ -586,11 +586,8 @@ async fn run_environments(
                 let value = client
                     .get_api_json(&api_key, &format!("/v1/environments/{id}"))
                     .await?;
-                let status = value
-                    .get("status")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("unknown");
-                if matches!(status, "ready" | "failed" | "cancelled") {
+                let status = environment_status(&value);
+                if matches!(status.as_str(), "ready" | "failed" | "cancelled") {
                     print_api_value(value, args.json)?;
                     break;
                 }
@@ -599,7 +596,7 @@ async fn run_environments(
                     print_api_value(value, args.json)?;
                     return Err(CliError::PollingTimeout {
                         id: id.to_string(),
-                        status: status.to_owned(),
+                        status,
                     });
                 }
                 tokio::time::sleep(POLL_INTERVAL.min(remaining)).await;
@@ -607,6 +604,14 @@ async fn run_environments(
         }
     }
     Ok(())
+}
+
+fn environment_status(value: &serde_json::Value) -> String {
+    value
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown")
+        .to_owned()
 }
 
 fn read_requirements(path: &std::path::Path) -> Result<Vec<String>, CliError> {
@@ -1135,6 +1140,13 @@ mod tests {
             .is_ok()
         );
         assert!(Cli::try_parse_from(["mpaka", "environments", "list", "--json"]).is_ok());
+    }
+
+    #[test]
+    fn keeps_environment_status_for_timeout_reporting() {
+        let value = serde_json::json!({"status": "building"});
+        assert_eq!(environment_status(&value), "building");
+        assert_eq!(environment_status(&serde_json::json!({})), "unknown");
     }
 
     #[test]
