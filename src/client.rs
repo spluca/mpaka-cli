@@ -1,6 +1,7 @@
 use reqwest::{StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use std::{fmt, time::Duration};
+use uuid::Uuid;
 
 use crate::session::Session;
 
@@ -22,6 +23,8 @@ pub struct Identity {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ClientError {
     InvalidEndpoint,
+    InvalidId,
+    InvalidIdempotencyKey,
     RequestFailed,
     InvalidCredentials,
     RegistrationConflict,
@@ -37,6 +40,10 @@ impl fmt::Display for ClientError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
             Self::InvalidEndpoint => "the API endpoint is invalid",
+            Self::InvalidId => "the identifier must be a UUID",
+            Self::InvalidIdempotencyKey => {
+                "the idempotency key must be 1 to 128 visible ASCII characters"
+            }
             Self::RequestFailed => "the authentication service could not be reached",
             Self::InvalidCredentials => "the email or password is invalid",
             Self::RegistrationConflict => "that email is already registered",
@@ -64,7 +71,16 @@ pub struct ExecutionRequest {
     pub language: String,
     pub code: String,
     pub timeout_ms: u64,
-    pub memory_mb: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_mb: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vcpu_count: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment_id: Option<Uuid>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -74,12 +90,32 @@ pub struct ExecutionResponse {
     pub language: String,
     pub timeout_ms: u64,
     pub memory_mb: u64,
+    #[serde(default)]
+    pub vcpu_count: u8,
     pub created_at: String,
     pub finished_at: Option<String>,
     pub stdout: String,
     pub stderr: String,
     pub exit_code: Option<i32>,
     pub mode: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ExecutionSummary {
+    pub id: String,
+    pub status: String,
+    pub language: String,
+    pub created_at: String,
+    pub finished_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ExecutionPage {
+    pub items: Vec<ExecutionSummary>,
+    pub page: u32,
+    pub page_size: u32,
+    pub total: u64,
+    pub has_next: bool,
 }
 
 #[derive(Deserialize)]
@@ -96,8 +132,30 @@ impl AuthClient {
     pub fn new(endpoint: &str) -> Result<Self, ClientError> {
         let endpoint =
             Url::parse(endpoint.trim_end_matches('/')).map_err(|_| ClientError::InvalidEndpoint)?;
+        let loopback = endpoint.host_str().is_some_and(|host| {
+            host.eq_ignore_ascii_case("localhost")
+                || host
+                    .parse::<std::net::IpAddr>()
+                    .is_ok_and(|address| address.is_loopback())
+        });
+        if !matches!(endpoint.scheme(), "http" | "https")
+            || endpoint.host_str().is_none()
+            || endpoint.username() != ""
+            || endpoint.password().is_some()
+            || endpoint.query().is_some()
+            || endpoint.fragment().is_some()
+            || (endpoint.scheme() != "https" && !loopback)
+        {
+            return Err(ClientError::InvalidEndpoint);
+        }
+        let timeout = std::env::var("MPAKA_API_TIMEOUT_SECONDS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|seconds| (1..=120).contains(seconds))
+            .unwrap_or(15);
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(timeout))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| ClientError::RequestFailed)?;
         Ok(Self { client, endpoint })
@@ -131,10 +189,7 @@ impl AuthClient {
         if !response.status().is_success() {
             return Err(ClientError::InvalidResponse);
         }
-        response
-            .json::<Identity>()
-            .await
-            .map_err(|_| ClientError::InvalidResponse)
+        decode_json(response, MAX_METADATA_RESPONSE_BYTES).await
     }
 
     pub async fn logout(&self, session: &Session) -> Result<(), ClientError> {
@@ -149,12 +204,67 @@ impl AuthClient {
         Err(ClientError::InvalidResponse)
     }
 
+    pub async fn get_session_api_json(
+        &self,
+        session: &Session,
+        path: &str,
+    ) -> Result<serde_json::Value, ClientError> {
+        let response = self
+            .request_with_session(reqwest::Method::GET, path, session)
+            .send()
+            .await
+            .map_err(|_| ClientError::RequestFailed)?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(map_error(path, status, response).await);
+        }
+        decode_json(response, MAX_LIST_RESPONSE_BYTES).await
+    }
+
+    pub async fn post_session_api_json(
+        &self,
+        session: &Session,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, ClientError> {
+        let response = self
+            .request_with_session(reqwest::Method::POST, path, session)
+            .json(body)
+            .send()
+            .await
+            .map_err(|_| ClientError::RequestFailed)?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(map_error(path, status, response).await);
+        }
+        decode_json(response, MAX_METADATA_RESPONSE_BYTES).await
+    }
+
+    pub async fn delete_session_api(
+        &self,
+        session: &Session,
+        path: &str,
+    ) -> Result<(), ClientError> {
+        let response = self
+            .request_with_session(reqwest::Method::DELETE, path, session)
+            .send()
+            .await
+            .map_err(|_| ClientError::RequestFailed)?;
+        let status = response.status();
+        if status.is_success() {
+            Ok(())
+        } else {
+            Err(map_error(path, status, response).await)
+        }
+    }
+
     pub async fn create_execution(
         &self,
         api_key: &str,
         request: &ExecutionRequest,
         idempotency_key: &str,
     ) -> Result<ExecutionResponse, ClientError> {
+        validate_idempotency_key(idempotency_key)?;
         let response = self
             .request_with_api_key(reqwest::Method::POST, "/v1/executions", api_key)
             .header("idempotency-key", idempotency_key)
@@ -170,6 +280,7 @@ impl AuthClient {
         api_key: &str,
         id: &str,
     ) -> Result<ExecutionResponse, ClientError> {
+        Uuid::parse_str(id).map_err(|_| ClientError::InvalidId)?;
         let path = format!("/v1/executions/{id}");
         let response = self
             .request_with_api_key(reqwest::Method::GET, &path, api_key)
@@ -182,9 +293,36 @@ impl AuthClient {
     pub async fn list_executions(
         &self,
         api_key: &str,
-    ) -> Result<Vec<ExecutionResponse>, ClientError> {
+        page: u32,
+        page_size: u32,
+        status_filter: Option<&str>,
+        language: Option<&str>,
+        query: Option<&str>,
+        created_on: Option<&str>,
+    ) -> Result<ExecutionPage, ClientError> {
+        let mut url = self
+            .endpoint
+            .join("/v1/executions")
+            .map_err(|_| ClientError::InvalidEndpoint)?;
+        {
+            let mut pairs = url.query_pairs_mut();
+            pairs.append_pair("page", &page.to_string());
+            pairs.append_pair("page_size", &page_size.to_string());
+            if let Some(status_filter) = status_filter {
+                pairs.append_pair("status", status_filter);
+            }
+            if let Some(language) = language {
+                pairs.append_pair("language", language);
+            }
+            if let Some(query) = query {
+                pairs.append_pair("q", query);
+            }
+            if let Some(created_on) = created_on {
+                pairs.append_pair("created_on", created_on);
+            }
+        }
         let response = self
-            .request_with_api_key(reqwest::Method::GET, "/v1/executions", api_key)
+            .request_with_api_key(reqwest::Method::GET, url.as_str(), api_key)
             .send()
             .await
             .map_err(|_| ClientError::RequestFailed)?;
@@ -192,10 +330,46 @@ impl AuthClient {
         if !status.is_success() {
             return Err(map_error("/v1/executions", status, response).await);
         }
-        response
-            .json::<Vec<ExecutionResponse>>()
+        decode_json(response, MAX_LIST_RESPONSE_BYTES).await
+    }
+
+    pub async fn get_api_json(
+        &self,
+        api_key: &str,
+        path: &str,
+    ) -> Result<serde_json::Value, ClientError> {
+        let response = self
+            .request_with_api_key(reqwest::Method::GET, path, api_key)
+            .send()
             .await
-            .map_err(|_| ClientError::InvalidResponse)
+            .map_err(|_| ClientError::RequestFailed)?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(map_error(path, status, response).await);
+        }
+        decode_json(response, MAX_LIST_RESPONSE_BYTES).await
+    }
+
+    pub async fn post_api_json(
+        &self,
+        api_key: &str,
+        path: &str,
+        body: &serde_json::Value,
+        idempotency_key: &str,
+    ) -> Result<serde_json::Value, ClientError> {
+        validate_idempotency_key(idempotency_key)?;
+        let response = self
+            .request_with_api_key(reqwest::Method::POST, path, api_key)
+            .header("idempotency-key", idempotency_key)
+            .json(body)
+            .send()
+            .await
+            .map_err(|_| ClientError::RequestFailed)?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(map_error(path, status, response).await);
+        }
+        decode_json(response, MAX_METADATA_RESPONSE_BYTES).await
     }
 
     pub async fn cancel_execution(
@@ -203,6 +377,7 @@ impl AuthClient {
         api_key: &str,
         id: &str,
     ) -> Result<ExecutionResponse, ClientError> {
+        Uuid::parse_str(id).map_err(|_| ClientError::InvalidId)?;
         let path = format!("/v1/executions/{id}/cancel");
         let response = self
             .request_with_api_key(reqwest::Method::POST, &path, api_key)
@@ -269,17 +444,13 @@ impl AuthClient {
             .and_then(|value| extract_session_token(value.to_str().ok()?))
             .ok_or(ClientError::MissingSession)?
             .to_owned();
-        let identity = response
-            .json::<Identity>()
-            .await
-            .map_err(|_| ClientError::InvalidResponse)?;
+        let identity = decode_json(response, MAX_METADATA_RESPONSE_BYTES).await?;
         Ok((identity, Session::from_token(token)))
     }
 }
 
 async fn map_error(path: &str, status: StatusCode, response: reqwest::Response) -> ClientError {
-    let code = response
-        .json::<ApiErrorEnvelope>()
+    let code = decode_json::<ApiErrorEnvelope>(response, MAX_ERROR_RESPONSE_BYTES)
         .await
         .ok()
         .map(|envelope| envelope.error.code);
@@ -307,10 +478,48 @@ async fn parse_execution_response(
     if !status.is_success() {
         return Err(map_error("/v1/executions", status, response).await);
     }
-    response
-        .json::<ExecutionResponse>()
+    decode_json(response, MAX_EXECUTION_RESPONSE_BYTES).await
+}
+
+const MAX_METADATA_RESPONSE_BYTES: usize = 64 * 1024;
+const MAX_ERROR_RESPONSE_BYTES: usize = 16 * 1024;
+const MAX_EXECUTION_RESPONSE_BYTES: usize = 1024 * 1024;
+const MAX_LIST_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_IDEMPOTENCY_KEY_BYTES: usize = 128;
+
+fn validate_idempotency_key(value: &str) -> Result<(), ClientError> {
+    if value.trim().is_empty()
+        || value.len() > MAX_IDEMPOTENCY_KEY_BYTES
+        || !value.bytes().all(|byte| byte.is_ascii_graphic())
+    {
+        return Err(ClientError::InvalidIdempotencyKey);
+    }
+    Ok(())
+}
+
+async fn decode_json<T: serde::de::DeserializeOwned>(
+    response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<T, ClientError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > max_bytes as u64)
+    {
+        return Err(ClientError::InvalidResponse);
+    }
+    let mut response = response;
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map_err(|_| ClientError::InvalidResponse)
+        .map_err(|_| ClientError::InvalidResponse)?
+    {
+        if body.len().saturating_add(chunk.len()) > max_bytes {
+            return Err(ClientError::InvalidResponse);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&body).map_err(|_| ClientError::InvalidResponse)
 }
 
 fn extract_session_token(set_cookie: &str) -> Option<&str> {
@@ -338,6 +547,26 @@ mod tests {
             Some("opaque")
         );
         assert_eq!(extract_session_token("other=value"), None);
+    }
+
+    #[test]
+    fn rejects_cleartext_remote_api_endpoints() {
+        assert!(matches!(
+            AuthClient::new("http://api.mpaka.dev"),
+            Err(ClientError::InvalidEndpoint)
+        ));
+    }
+
+    #[test]
+    fn allows_loopback_http_for_local_development() {
+        assert!(AuthClient::new("http://127.0.0.1:5300").is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_idempotency_keys_locally() {
+        assert!(validate_idempotency_key("valid-key").is_ok());
+        assert!(validate_idempotency_key("bad key").is_err());
+        assert!(validate_idempotency_key(&"x".repeat(129)).is_err());
     }
 
     #[tokio::test]
@@ -537,7 +766,11 @@ mod tests {
                     language: "python".into(),
                     code: "print(1)".into(),
                     timeout_ms: 3000,
-                    memory_mb: 128,
+                    memory_mb: Some(128),
+                    vcpu_count: None,
+                    cpu_profile: None,
+                    memory_profile: None,
+                    environment_id: None,
                 },
                 "run-1",
             )
@@ -609,30 +842,27 @@ mod tests {
                         .and_then(|value| value.to_str().ok()),
                     Some("Bearer api-key")
                 );
-                Json(json!([
-                    {
+                Json(json!({
+                    "items": [{
                         "id":"00000000-0000-0000-0000-000000000001",
                         "status":"completed",
                         "language":"python",
-                        "timeout_ms":3000,
-                        "memory_mb":128,
                         "created_at":"2026-10-28T10:00:00Z",
-                        "finished_at":"2026-10-28T10:00:01Z",
-                        "stdout":"2\n",
-                        "stderr":"",
-                        "exit_code":0,
-                        "mode":"mock_no_code_execution"
-                    }
-                ]))
+                        "finished_at":"2026-10-28T10:00:01Z"
+                    }],
+                    "page": 1, "page_size": 25, "total": 1, "has_next": false
+                }))
             }),
         ))
         .await;
         let client = AuthClient::new(&server).expect("client");
-        let executions = client.list_executions("api-key").await.expect("executions");
-        assert_eq!(executions.len(), 1);
-        assert_eq!(executions[0].status, "completed");
-        assert_eq!(executions[0].stdout, "2\n");
-        assert_eq!(executions[0].mode, "mock_no_code_execution");
+        let page = client
+            .list_executions("api-key", 1, 25, None, None, None, None)
+            .await
+            .expect("executions");
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].status, "completed");
+        assert_eq!(page.total, 1);
     }
 
     #[tokio::test]
@@ -686,7 +916,9 @@ mod tests {
         .await;
         let client = AuthClient::new(&server).expect("client");
         assert_eq!(
-            client.list_executions("api-key").await,
+            client
+                .list_executions("api-key", 1, 25, None, None, None, None)
+                .await,
             Err(ClientError::Api {
                 code: "rate_limit_exceeded".into()
             })
