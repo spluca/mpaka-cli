@@ -161,9 +161,11 @@ logout, including an already-expired session.
 
 `api-keys` uses the stored web session. Creating, rotating, and deleting keys
 requires an owner account. Create and rotate return the secret once; the CLI
-does not persist it. Save it in a system secret store or export it as
-`MPAKA_API_KEY` for execution commands. `list` returns metadata only, while
-`delete` revokes a key.
+prints the returned secret once to stdout (including with `--json`) and warns
+on stderr. The CLI does not persist it. Treat this output as sensitive: avoid
+shell tracing, CI log capture, and build artifacts when creating or rotating a
+key. Store it in a system secret manager or export it as `MPAKA_API_KEY` for
+execution commands. `list` returns metadata only, while `delete` revokes a key.
 
 `run` requires `MPAKA_API_KEY` and submits Python through
 `POST /v1/executions`, then polls `GET /v1/executions/{id}` until the execution
@@ -233,6 +235,7 @@ metering data. `usage` uses `GET /v1/usage/summary`; `--period` accepts `1d`
 through `366d`, and `--group-by` currently accepts only `day`. These commands
 accept `--json` for machine-readable output.
 
-The CLI does not print session tokens, API keys, or passwords. The same
-API-key execution contract is intended for the future TypeScript and Python
-SDKs.
+The CLI does not print session tokens or passwords. API-key creation and
+rotation are the exceptions: they print the one-time secret as described above.
+The same API-key execution contract is intended for the future TypeScript and
+Python SDKs.

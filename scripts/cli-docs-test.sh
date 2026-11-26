@@ -23,6 +23,8 @@ required_snippets=(
   'latest-v2'
   'run `mpaka self-update` twice'
   'rollback'
+  'prints the returned secret once to stdout (including with `--json`)'
+  'avoid shell tracing, CI log capture, and build artifacts'
 )
 
 for snippet in "${required_snippets[@]}"; do
@@ -31,6 +33,11 @@ for snippet in "${required_snippets[@]}"; do
     exit 1
   fi
 done
+
+if grep -Fq 'The CLI does not print session tokens, API keys, or passwords.' "$docs_file"; then
+  printf 'CLI documentation incorrectly says API keys are never printed\n' >&2
+  exit 1
+fi
 
 for snippet in \
   '`latest` remains fixed at `v0.2.0`' \
