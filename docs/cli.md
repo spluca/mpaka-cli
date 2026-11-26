@@ -102,8 +102,10 @@ does not accept source code for execution.
 The CLI uses the mPaka API at `https://api.mpaka.dev` by default. Set
 `MPAKA_API_URL` or pass `--endpoint` to use another API endpoint.
 
-The opaque web session is stored at `~/.config/mpaka/session`. Set
-`RUSTBOX_SESSION_FILE` to choose another path. The file is created with
+The opaque web session is stored under `~/.config/mpaka/sessions/` using a
+SHA-256 identifier derived from the API endpoint. This prevents a session
+issued by one server from being sent to another when `--endpoint` changes. Set
+`RUSTBOX_SESSION_FILE` to use an explicit path instead. The file is created with
 owner-only permissions on Unix; symlinked or insecure session files are
 rejected, and Unix reads use a no-follow file descriptor to avoid following a
 symlink introduced concurrently.
@@ -115,14 +117,32 @@ mpaka register --email user@example.com
 mpaka login --email user@example.com
 mpaka whoami
 mpaka logout
+mpaka api-keys create --name development
+mpaka api-keys list
+mpaka api-keys rotate <KEY_ID>
+mpaka api-keys delete <KEY_ID>
 export MPAKA_API_KEY='...'
 mpaka run --file script.py
 mpaka run --file script.py --idempotency-key deploy-check-1
+mpaka run --file script.py --async --json
 mpaka run --file script.py --max-poll-attempts 1200
+mpaka run --file script.py --cpu-profile high_cpu --memory-profile high_memory
+mpaka run --file script.py --vcpu-count 2 --memory-mb 512
 cat script.py | mpaka run --stdin
+mpaka environments create --requirements requirements.txt
+mpaka environments list
+mpaka environments get <ENVIRONMENT_ID>
+mpaka environments wait <ENVIRONMENT_ID> --wait-timeout-ms 60000
+mpaka run --file script.py --environment <ENVIRONMENT_ID>
 mpaka executions list
+mpaka executions list --page 2 --page-size 50 --status completed
 mpaka executions get <EXECUTION_ID>
 mpaka executions cancel <EXECUTION_ID>
+mpaka executions wait <EXECUTION_ID> --wait-timeout-ms 60000
+mpaka limits
+mpaka limits --json
+mpaka usage --period 30d --group-by day
+mpaka quota
 ```
 
 Passwords are read from the terminal without echoing on Unix and Windows.
@@ -134,9 +154,16 @@ printf '%s\n' "$MPAKA_PASSWORD" | mpaka login \
   --email user@example.com --password-stdin
 ```
 
-`whoami` uses the stored session to call `GET /v1/me`. `logout` calls
+`whoami --json` writes the identity response to stdout. `whoami` uses the stored
+session to call `GET /v1/me`. `logout` calls
 `POST /v1/logout` and removes the local session after the server accepts the
 logout, including an already-expired session.
+
+`api-keys` uses the stored web session. Creating, rotating, and deleting keys
+requires an owner account. Create and rotate return the secret once; the CLI
+does not persist it. Save it in a system secret store or export it as
+`MPAKA_API_KEY` for execution commands. `list` returns metadata only, while
+`delete` revokes a key.
 
 `run` requires `MPAKA_API_KEY` and submits Python through
 `POST /v1/executions`, then polls `GET /v1/executions/{id}` until the execution
@@ -156,8 +183,20 @@ is not an API credential. Create the execution
 API key in the API keys section of the web console and keep it in the
 environment or a server-side secret store; do not pass the API key as a
 command-line argument. Optional execution limits are `--timeout-ms` (default
-`3000`) and `--memory-mb` (default `128`). Use either `--file <PATH>` or
-`--stdin`.
+`3000`), `--memory-mb` (default `128`), `--cpu-profile`, `--memory-profile`,
+`--vcpu-count`, and `--environment`. A CPU profile conflicts with a numeric
+vCPU count; a memory profile conflicts with `--memory-mb`. Use `mpaka limits`
+to discover current bounds and profiles. Use either `--file <PATH>` or
+`--stdin`; source reads stop after 16 KiB plus one byte.
+
+`--async` returns the accepted execution immediately. It does not poll or
+cancel the remote job. Use `mpaka executions wait <ID> --wait-timeout-ms 60000`
+to wait later. When that local deadline expires, the command reports the last
+known state and leaves the remote execution running.
+
+`environments create` accepts a text file with up to 32 pinned requirements.
+Environment creation is asynchronous; use `environments wait` and then pass
+the ready environment ID to `run --environment`.
 
 The command prints status, mode, exit code, stdout, and stderr. A zero process
 exit code means the API reports `completed`, the result is not
@@ -177,8 +216,8 @@ mpaka executions get "$EXECUTION_ID" --json
 mpaka executions cancel "$EXECUTION_ID"
 ```
 
-`list` uses the server-bounded execution history and does not accept a client
-side pagination flag. `get` returns lifecycle metadata plus stdout, stderr,
+`list` supports server pagination and `--status`, `--language`, `--query`, and
+`--created-on` filters. `get` returns lifecycle metadata plus stdout, stderr,
 exit code, and mode. `cancel` requests cancellation and prints the state
 returned by the API; completion can win a race with cancellation, so the
 returned terminal status is authoritative. Use `--json` when another program
@@ -188,6 +227,11 @@ Missing credentials, transport failures, invalid IDs, and API error responses
 return a non-zero exit code. Inspection commands return zero when the API
 request succeeds, even when the execution itself is `failed`, `timed_out`, or
 `cancelled`.
+
+`limits`, `quota`, and `usage` read current API configuration and tenant-scoped
+metering data. `usage` uses `GET /v1/usage/summary`; `--period` accepts `1d`
+through `366d`, and `--group-by` currently accepts only `day`. These commands
+accept `--json` for machine-readable output.
 
 The CLI does not print session tokens, API keys, or passwords. The same
 API-key execution contract is intended for the future TypeScript and Python
