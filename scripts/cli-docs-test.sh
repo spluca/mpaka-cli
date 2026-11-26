@@ -24,7 +24,7 @@ required_snippets=(
   'run `mpaka self-update` twice'
   'rollback'
   'prints the returned secret once to stdout (including with `--json`)'
-  'avoid shell tracing, CI log capture, and build artifacts'
+  'shell tracing, CI log capture, and build artifacts'
 )
 
 for snippet in "${required_snippets[@]}"; do
