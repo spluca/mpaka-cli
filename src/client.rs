@@ -118,6 +118,16 @@ pub struct ExecutionPage {
     pub has_next: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ExecutionListQuery<'a> {
+    pub page: u32,
+    pub page_size: u32,
+    pub status: Option<&'a str>,
+    pub language: Option<&'a str>,
+    pub query: Option<&'a str>,
+    pub created_on: Option<&'a str>,
+}
+
 #[derive(Deserialize)]
 struct ApiErrorEnvelope {
     error: ApiError,
@@ -293,12 +303,7 @@ impl AuthClient {
     pub async fn list_executions(
         &self,
         api_key: &str,
-        page: u32,
-        page_size: u32,
-        status_filter: Option<&str>,
-        language: Option<&str>,
-        query: Option<&str>,
-        created_on: Option<&str>,
+        query: ExecutionListQuery<'_>,
     ) -> Result<ExecutionPage, ClientError> {
         let mut url = self
             .endpoint
@@ -306,18 +311,18 @@ impl AuthClient {
             .map_err(|_| ClientError::InvalidEndpoint)?;
         {
             let mut pairs = url.query_pairs_mut();
-            pairs.append_pair("page", &page.to_string());
-            pairs.append_pair("page_size", &page_size.to_string());
-            if let Some(status_filter) = status_filter {
+            pairs.append_pair("page", &query.page.to_string());
+            pairs.append_pair("page_size", &query.page_size.to_string());
+            if let Some(status_filter) = query.status {
                 pairs.append_pair("status", status_filter);
             }
-            if let Some(language) = language {
+            if let Some(language) = query.language {
                 pairs.append_pair("language", language);
             }
-            if let Some(query) = query {
-                pairs.append_pair("q", query);
+            if let Some(search) = query.query {
+                pairs.append_pair("q", search);
             }
-            if let Some(created_on) = created_on {
+            if let Some(created_on) = query.created_on {
                 pairs.append_pair("created_on", created_on);
             }
         }
@@ -876,7 +881,14 @@ mod tests {
         .await;
         let client = AuthClient::new(&server).expect("client");
         let page = client
-            .list_executions("api-key", 1, 25, None, None, None, None)
+            .list_executions(
+                "api-key",
+                ExecutionListQuery {
+                    page: 1,
+                    page_size: 25,
+                    ..Default::default()
+                },
+            )
             .await
             .expect("executions");
         assert_eq!(page.items.len(), 1);
@@ -936,7 +948,14 @@ mod tests {
         let client = AuthClient::new(&server).expect("client");
         assert_eq!(
             client
-                .list_executions("api-key", 1, 25, None, None, None, None)
+                .list_executions(
+                    "api-key",
+                    ExecutionListQuery {
+                        page: 1,
+                        page_size: 25,
+                        ..Default::default()
+                    }
+                )
                 .await,
             Err(ClientError::Api {
                 code: "rate_limit_exceeded".into()
