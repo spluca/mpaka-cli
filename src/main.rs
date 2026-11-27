@@ -620,6 +620,10 @@ fn environment_status(value: &serde_json::Value) -> String {
         .to_owned()
 }
 
+fn is_terminal_environment_status(status: &str) -> bool {
+    matches!(status, "ready" | "failed")
+}
+
 fn environment_list_path(page: u32, page_size: u32) -> String {
     format!("/v1/environments?page={page}&page_size={page_size}")
 }
@@ -653,15 +657,14 @@ async fn wait_environment(
             Ok(Ok(value)) => {
                 let status = environment_status(&value);
                 last_response = Some(value.clone());
-                match status.as_str() {
-                    "ready" | "cancelled" => return Ok(value),
-                    "failed" => {
+                if is_terminal_environment_status(&status) {
+                    if status == "failed" {
                         return Err(EnvironmentWaitFailure {
                             error: CliError::EnvironmentFailed(id.to_owned()),
                             response: last_response,
                         });
                     }
-                    _ => {}
+                    return Ok(value);
                 }
             }
             Err(_) => {
@@ -1253,6 +1256,65 @@ mod tests {
         let value = serde_json::json!({"status": "building"});
         assert_eq!(environment_status(&value), "building");
         assert_eq!(environment_status(&serde_json::json!({})), "unknown");
+    }
+
+    #[test]
+    fn environment_wait_uses_only_openapi_terminal_states() {
+        for status in ["queued", "building"] {
+            assert!(!is_terminal_environment_status(status));
+        }
+        for status in ["ready", "failed"] {
+            assert!(is_terminal_environment_status(status));
+        }
+        assert!(!is_terminal_environment_status("cancelled"));
+    }
+
+    #[test]
+    fn checked_in_openapi_covers_python_client_routes_states_and_errors() {
+        let contract: serde_json::Value =
+            serde_json::from_str(include_str!("../contracts/openapi.json"))
+                .expect("OpenAPI fixture");
+        let paths = &contract["paths"];
+        let schemas = &contract["components"]["schemas"];
+
+        assert_eq!(
+            paths["/v1/environments"]["post"]["operationId"],
+            "create_python_environment"
+        );
+        assert_eq!(
+            paths["/v1/environments/{id}"]["get"]["operationId"],
+            "get_python_environment"
+        );
+        assert_eq!(
+            paths["/v1/executions"]["post"]["operationId"],
+            "create_execution"
+        );
+        assert_eq!(
+            paths["/v1/executions/{id}"]["get"]["operationId"],
+            "get_execution"
+        );
+        for (path, method, status) in [
+            ("/v1/environments", "post", "202"),
+            ("/v1/environments", "post", "400"),
+            ("/v1/environments", "post", "503"),
+            ("/v1/environments/{id}", "get", "404"),
+            ("/v1/environments/{id}", "get", "503"),
+            ("/v1/executions", "post", "404"),
+            ("/v1/executions", "post", "409"),
+        ] {
+            assert!(
+                paths[path][method]["responses"].get(status).is_some(),
+                "OpenAPI fixture is missing {status} for {method} {path}"
+            );
+        }
+        for status in ["queued", "building", "ready", "failed"] {
+            assert!(
+                schemas["EnvironmentStatusSchema"]["enum"]
+                    .as_array()
+                    .expect("environment status enum")
+                    .contains(&serde_json::Value::String(status.into()))
+            );
+        }
     }
 
     #[tokio::test]

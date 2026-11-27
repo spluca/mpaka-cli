@@ -207,6 +207,26 @@ with `--json`; `ready` exits successfully, while `failed` exits non-zero. Its
 interval, and a timeout prints the last response received before exiting
 non-zero.
 
+For a controlled Python environment acceptance, configure `MPAKA_API_URL` and
+`MPAKA_API_KEY` through the operator's secret store, then run the CLI before
+the MCP client against the same frozen API candidate. Create
+`requests==2.32.3`, wait for `ready`, and run the import twice with distinct
+idempotency keys using the returned environment ID. Save `--json` responses
+for the environment and executions so the campaign can correlate their IDs,
+statuses, output, execution mode, and artifact digest. Require stdout
+`2.32.3`, exit code `0`, and Firecracker execution mode. The public API does
+not expose the Executor cache state; correlate the second execution ID with
+Executor logs to verify a local artifact cache hit. A CLI timeout, API error, failed
+environment, non-Firecracker result, or `mock_no_code_execution` response
+fails acceptance; preserve the response and error code for diagnosis.
+
+The shared controlled deployment procedure is
+[`python-environment-campaign.md`](https://github.com/antpard/rustbox/blob/main/docs/operations/python-environment-campaign.md).
+It checks `/openapi.json` against this client's contract fixture before
+running CLI and then MCP with the same environment ID. The fixture in
+`contracts/openapi.json` is synchronized from the RustBox snapshot; use the
+RustBox contract-check command before accepting a client or API change.
+
 The command prints status, mode, exit code, stdout, and stderr. A zero process
 exit code means the API reports `completed`, the result is not
 `mock_no_code_execution`, and the program returned exit code `0`. A non-zero

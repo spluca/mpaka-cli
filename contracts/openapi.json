@@ -1,0 +1,2265 @@
+{
+  "components": {
+    "schemas": {
+      "ApiError": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "ApiKeyResponse": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "key_id": {
+            "type": "string"
+          },
+          "last_used_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "key_id",
+          "name",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "AttemptUsageDayResponse": {
+        "properties": {
+          "attempt_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "date": {
+            "type": "string"
+          },
+          "measured_attempt_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pending_attempt_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "provisioned_mib_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "provisioned_vcpu_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "unmeasured_terminal_attempt_count": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "attempt_count",
+          "measured_attempt_count",
+          "pending_attempt_count",
+          "unmeasured_terminal_attempt_count",
+          "provisioned_vcpu_ms",
+          "provisioned_mib_ms"
+        ],
+        "type": "object"
+      },
+      "AttemptUsageItemResponse": {
+        "properties": {
+          "assigned_at": {
+            "type": "string"
+          },
+          "assignment_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "attempt_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "attempt_state": {
+            "type": "string"
+          },
+          "duration_ms": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "execution_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "execution_status": {
+            "type": "string"
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "host_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "memory_mb": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "metering_contract_version": {
+            "format": "int16",
+            "maximum": 32767,
+            "minimum": -32768,
+            "type": "integer"
+          },
+          "provisioned_mib_ms": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "provisioned_vcpu_ms": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "vcpu_count": {
+            "format": "int16",
+            "maximum": 32767,
+            "minimum": -32768,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "attempt_id",
+          "assignment_id",
+          "execution_id",
+          "host_id",
+          "attempt_state",
+          "execution_status",
+          "vcpu_count",
+          "memory_mb",
+          "assigned_at",
+          "metering_contract_version"
+        ],
+        "type": "object"
+      },
+      "AttemptUsageResponse": {
+        "properties": {
+          "attempt_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AttemptUsageItemResponse"
+            },
+            "type": "array"
+          },
+          "measured_attempt_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provisioned_mib_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "provisioned_vcpu_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "since": {
+            "type": "string"
+          },
+          "until": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "until",
+          "attempt_count",
+          "measured_attempt_count",
+          "provisioned_vcpu_ms",
+          "provisioned_mib_ms",
+          "has_more",
+          "items"
+        ],
+        "type": "object"
+      },
+      "AttemptUsageSummaryResponse": {
+        "properties": {
+          "attempt_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "daily": {
+            "items": {
+              "$ref": "#/components/schemas/AttemptUsageDayResponse"
+            },
+            "type": "array"
+          },
+          "measured_attempt_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "pending_attempt_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "provisioned_mib_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "provisioned_vcpu_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "since": {
+            "type": "string"
+          },
+          "unmeasured_terminal_attempt_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "until": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "until",
+          "attempt_count",
+          "measured_attempt_count",
+          "pending_attempt_count",
+          "unmeasured_terminal_attempt_count",
+          "provisioned_vcpu_ms",
+          "provisioned_mib_ms",
+          "daily"
+        ],
+        "type": "object"
+      },
+      "CreateApiKeyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "CreateExecutionRequest": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "cpu_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GuestCpuProfileSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "environment_id": {
+            "default": null,
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "language": {
+            "type": "string"
+          },
+          "memory_mb": {
+            "default": null,
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "memory_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GuestMemoryProfileSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "timeout_ms": {
+            "default": null,
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "vcpu_count": {
+            "default": null,
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "language",
+          "code"
+        ],
+        "type": "object"
+      },
+      "CreatePythonEnvironmentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "requirements": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "requirements"
+        ],
+        "type": "object"
+      },
+      "CreatedApiKeyResponse": {
+        "properties": {
+          "key_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key_id",
+          "name",
+          "token"
+        ],
+        "type": "object"
+      },
+      "DashboardActivityResponse": {
+        "properties": {
+          "completed_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "date": {
+            "type": "string"
+          },
+          "failed_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "timed_out_count": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "completed_count",
+          "failed_count",
+          "timed_out_count"
+        ],
+        "type": "object"
+      },
+      "DashboardMetricsResponse": {
+        "properties": {
+          "active_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "concurrency_limit": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "p95_duration_ms": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "success_rate": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "today_count": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "today_count",
+          "active_count",
+          "concurrency_limit"
+        ],
+        "type": "object"
+      },
+      "DashboardOverviewResponse": {
+        "properties": {
+          "activity": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardActivityResponse"
+            },
+            "type": "array"
+          },
+          "activity_timezone": {
+            "type": "string"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/DashboardMetricsResponse"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/DashboardQuotaResponse"
+          },
+          "recent_executions": {
+            "items": {
+              "$ref": "#/components/schemas/ExecutionSummaryResponse"
+            },
+            "type": "array"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "updated_at",
+          "metrics",
+          "quota",
+          "recent_executions",
+          "activity",
+          "activity_timezone"
+        ],
+        "type": "object"
+      },
+      "DashboardQuotaResponse": {
+        "properties": {
+          "active_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "active_limit": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "limit_units": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "used_units": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "used_units",
+          "limit_units",
+          "active_count",
+          "active_limit"
+        ],
+        "type": "object"
+      },
+      "EnvironmentStatusSchema": {
+        "enum": [
+          "queued",
+          "building",
+          "ready",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "ErrorBody": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "ExecutionPageResponse": {
+        "properties": {
+          "has_next": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ExecutionSummaryResponse"
+            },
+            "type": "array"
+          },
+          "page": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "page_size": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "page",
+          "page_size",
+          "total",
+          "has_next"
+        ],
+        "type": "object"
+      },
+      "ExecutionQueryParams": {
+        "properties": {
+          "created_on": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "page": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "page_size": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "q": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ExecutionResponse": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "exit_code": {
+            "format": "int32",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "memory_mb": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExecutionStatusSchema"
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "stdout": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "vcpu_count": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "language",
+          "timeout_ms",
+          "memory_mb",
+          "vcpu_count",
+          "created_at",
+          "stdout",
+          "stderr",
+          "mode"
+        ],
+        "type": "object"
+      },
+      "ExecutionStatusSchema": {
+        "enum": [
+          "queued",
+          "assigned",
+          "leased",
+          "provisioning",
+          "running",
+          "completed",
+          "failed",
+          "timed_out",
+          "cancelled"
+        ],
+        "type": "string"
+      },
+      "ExecutionSummaryResponse": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExecutionStatusSchema"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "language",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "GuestCpuProfileSchema": {
+        "enum": [
+          "standard",
+          "high_cpu"
+        ],
+        "type": "string"
+      },
+      "GuestMemoryProfileSchema": {
+        "enum": [
+          "standard",
+          "high_memory"
+        ],
+        "type": "string"
+      },
+      "PythonEnvironmentPageResponse": {
+        "properties": {
+          "has_next": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PythonEnvironmentResponse"
+            },
+            "type": "array"
+          },
+          "page": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "page_size": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "page",
+          "page_size",
+          "total",
+          "has_next"
+        ],
+        "type": "object"
+      },
+      "PythonEnvironmentQuery": {
+        "properties": {
+          "page": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "page_size": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "PythonEnvironmentResponse": {
+        "properties": {
+          "artifact_sha256": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "artifact_size_bytes": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "requirements": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "resolved_digest": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/EnvironmentStatusSchema"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "requirements",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "RequestBoundsResponse": {
+        "properties": {
+          "default_memory_mb": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "default_timeout_ms": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "default_vcpu_count": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "guest_cpu_profiles": {
+            "items": {
+              "$ref": "#/components/schemas/GuestCpuProfileSchema"
+            },
+            "type": "array"
+          },
+          "guest_memory_profiles": {
+            "items": {
+              "$ref": "#/components/schemas/GuestMemoryProfileSchema"
+            },
+            "type": "array"
+          },
+          "language": {
+            "type": "string"
+          },
+          "max_code_bytes": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_memory_mb": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_timeout_ms": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_vcpu_count": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "min_memory_mb": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "min_timeout_ms": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "min_vcpu_count": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "language",
+          "max_code_bytes",
+          "min_timeout_ms",
+          "max_timeout_ms",
+          "default_timeout_ms",
+          "min_memory_mb",
+          "max_memory_mb",
+          "default_memory_mb",
+          "guest_memory_profiles",
+          "guest_cpu_profiles",
+          "min_vcpu_count",
+          "max_vcpu_count",
+          "default_vcpu_count"
+        ],
+        "type": "object"
+      },
+      "RotateApiKeyRequest": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "UsageQuery": {
+        "properties": {
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "offset": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "since": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "until": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "UsageSummaryQuery": {
+        "properties": {
+          "group_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "since": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "until": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "WebIdentityResponse": {
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "tenant_name": {
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "email",
+          "tenant_id",
+          "tenant_name",
+          "role"
+        ],
+        "type": "object"
+      },
+      "WebLoginRequest": {
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearer_auth": {
+        "bearerFormat": "API key",
+        "description": "mPaka API key sent in the Authorization: Bearer header.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "cookie_session": {
+        "description": "Browser session cookie issued by login or registration.",
+        "in": "cookie",
+        "name": "rustbox_session",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "description": "Customer-facing API for Python execution, reusable environments, account management, and resource usage.",
+    "title": "mPaka API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/api-keys": {
+      "get": {
+        "description": "",
+        "operationId": "list_api_keys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApiKeyResponse"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "API key metadata"
+          }
+        },
+        "security": [
+          {
+            "cookie_session": []
+          },
+          {
+            "bearer_auth": []
+          }
+        ],
+        "summary": "List API keys belonging to the authenticated account.",
+        "tags": [
+          "API keys"
+        ]
+      },
+      "post": {
+        "description": "",
+        "operationId": "create_api_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApiKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedApiKeyResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedApiKeyResponse"
+                }
+              }
+            },
+            "description": "New key and its secret token"
+          }
+        },
+        "security": [
+          {
+            "cookie_session": []
+          }
+        ],
+        "summary": "Create an API key for the authenticated account.",
+        "tags": [
+          "API keys"
+        ]
+      }
+    },
+    "/v1/api-keys/{key_id}": {
+      "delete": {
+        "description": "",
+        "operationId": "delete_api_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "API key revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "API key not found"
+          }
+        },
+        "security": [
+          {
+            "cookie_session": []
+          }
+        ],
+        "summary": "Revoke an API key.",
+        "tags": [
+          "API keys"
+        ]
+      }
+    },
+    "/v1/api-keys/{key_id}/rotate": {
+      "post": {
+        "description": "",
+        "operationId": "rotate_api_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RotateApiKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedApiKeyResponse"
+                }
+              }
+            },
+            "description": "Rotated key and secret token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "API key not found"
+          }
+        },
+        "security": [
+          {
+            "cookie_session": []
+          }
+        ],
+        "summary": "Rotate an API key and return its new secret token.",
+        "tags": [
+          "API keys"
+        ]
+      }
+    },
+    "/v1/environments": {
+      "get": {
+        "description": "",
+        "operationId": "list_python_environments",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PythonEnvironmentPageResponse"
+                }
+              }
+            },
+            "description": "Environment page"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Python environments are not configured"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "cookie_session": []
+          }
+        ],
+        "summary": "List Python environments for the authenticated tenant.",
+        "tags": [
+          "Environments"
+        ]
+      },
+      "post": {
+        "description": "",
+        "operationId": "create_python_environment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePythonEnvironmentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PythonEnvironmentResponse"
+                }
+              }
+            },
+            "description": "Accepted environment build"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid request or missing Idempotency-Key"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Tenant environment creation is disabled"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Idempotency key conflicts with an earlier request"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Tenant request limit exceeded"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Python environments or Builder queue unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "cookie_session": []
+          }
+        ],
+        "summary": "Build a reusable Python environment from pinned package requirements. Include an Idempotency-Key header (1 to 128 characters) to make retries safe.",
+        "tags": [
+          "Environments"
+        ]
+      }
+    },
+    "/v1/environments/{id}": {
+      "get": {
+        "description": "",
+        "operationId": "get_python_environment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PythonEnvironmentResponse"
+                }
+              }
+            },
+            "description": "Environment status and metadata"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Environment not found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Python environments are not configured"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "cookie_session": []
+          }
+        ],
+        "summary": "Get a Python environment by ID.",
+        "tags": [
+          "Environments"
+        ]
+      }
+    },
+    "/v1/executions": {
+      "get": {
+        "description": "",
+        "operationId": "list_executions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "created_on",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "language",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionPageResponse"
+                }
+              }
+            },
+            "description": "Execution page"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "cookie_session": []
+          }
+        ],
+        "summary": "List executions for the authenticated tenant.",
+        "tags": [
+          "Executions"
+        ]
+      },
+      "post": {
+        "description": "",
+        "operationId": "create_execution",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateExecutionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionResponse"
+                }
+              }
+            },
+            "description": "Accepted execution"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid request or missing Idempotency-Key"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid credential"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Tenant execution is disabled"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Python environment not found for this tenant"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Environment is not ready or idempotency conflict"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Tenant request or concurrency limit exceeded"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Execution queue or Python environments unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "cookie_session": []
+          }
+        ],
+        "summary": "Submit Python code for execution. Include an Idempotency-Key header (1 to 128 characters) to make retries safe.",
+        "tags": [
+          "Executions"
+        ]
+      }
+    },
+    "/v1/executions/{id}": {
+      "get": {
+        "description": "",
+        "operationId": "get_execution",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionResponse"
+                }
+              }
+            },
+            "description": "Execution status and result"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Execution not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "cookie_session": []
+          }
+        ],
+        "summary": "Get an execution by ID.",
+        "tags": [
+          "Executions"
+        ]
+      }
+    },
+    "/v1/executions/{id}/cancel": {
+      "post": {
+        "description": "",
+        "operationId": "cancel_execution",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "style": "simple"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionResponse"
+                }
+              }
+            },
+            "description": "Updated execution status"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Execution not found"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "cookie_session": []
+          }
+        ],
+        "summary": "Request cancellation of an execution.",
+        "tags": [
+          "Executions"
+        ]
+      }
+    },
+    "/v1/limits": {
+      "get": {
+        "description": "Publishes the per-request bounds the domain enforces, so a client can learn\nwhat it may submit without reading the source or hardcoding a second copy.\nThe bounds are the same for every tenant; the credential is still required\nso the route matches the rest of `/v1`.",
+        "operationId": "request_bounds",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestBoundsResponse"
+                }
+              }
+            },
+            "description": "Current request limits"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid credential"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "cookie_session": []
+          }
+        ],
+        "summary": "Get execution input and resource limits.",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
+    "/v1/login": {
+      "post": {
+        "description": "",
+        "operationId": "web_login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebIdentityResponse"
+                }
+              }
+            },
+            "description": "Authenticated identity; the response sets the session cookie"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid credentials"
+          }
+        },
+        "summary": "Log in to an mPaka account.",
+        "tags": [
+          "Authentication"
+        ]
+      }
+    },
+    "/v1/logout": {
+      "post": {
+        "description": "",
+        "operationId": "web_logout",
+        "responses": {
+          "204": {
+            "description": "Session revoked and cookie cleared"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid session"
+          }
+        },
+        "security": [
+          {
+            "cookie_session": []
+          }
+        ],
+        "summary": "Revoke the current web session.",
+        "tags": [
+          "Authentication"
+        ]
+      }
+    },
+    "/v1/me": {
+      "get": {
+        "description": "",
+        "operationId": "web_me",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebIdentityResponse"
+                }
+              }
+            },
+            "description": "Current identity"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid session"
+          }
+        },
+        "security": [
+          {
+            "cookie_session": []
+          }
+        ],
+        "summary": "Return the identity associated with the current session.",
+        "tags": [
+          "Authentication"
+        ]
+      }
+    },
+    "/v1/overview": {
+      "get": {
+        "description": "",
+        "operationId": "dashboard_overview",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardOverviewResponse"
+                }
+              }
+            },
+            "description": "Account overview"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid credential"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "cookie_session": []
+          }
+        ],
+        "summary": "Get the account overview and recent execution activity.",
+        "tags": [
+          "Limits"
+        ]
+      }
+    },
+    "/v1/quota": {
+      "get": {
+        "description": "",
+        "operationId": "dashboard_quota",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardQuotaResponse"
+                }
+              }
+            },
+            "description": "Quota snapshot"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid credential"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "cookie_session": []
+          }
+        ],
+        "summary": "Get the current account quota.",
+        "tags": [
+          "Limits"
+        ]
+      }
+    },
+    "/v1/register": {
+      "post": {
+        "description": "",
+        "operationId": "web_register",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebIdentityResponse"
+                }
+              }
+            },
+            "description": "Created identity; the response sets the session cookie"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Registration is closed"
+          }
+        },
+        "summary": "Create an mPaka account and start a session.",
+        "tags": [
+          "Authentication"
+        ]
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "description": "",
+        "operationId": "tenant_attempt_usage",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttemptUsageResponse"
+                }
+              }
+            },
+            "description": "Usage page"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid date range or cursor"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid credential"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "cookie_session": []
+          }
+        ],
+        "summary": "List measured execution attempts for the authenticated tenant.",
+        "tags": [
+          "Usage"
+        ]
+      }
+    },
+    "/v1/usage/summary": {
+      "get": {
+        "description": "",
+        "operationId": "tenant_attempt_usage_summary",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "group_by",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "until",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "style": "form"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttemptUsageSummaryResponse"
+                }
+              }
+            },
+            "description": "Usage totals and optional daily grouping"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid date range or grouping"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Invalid credential"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "cookie_session": []
+          }
+        ],
+        "summary": "Get aggregate resource usage for the authenticated tenant.",
+        "tags": [
+          "Usage"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "mPaka production API",
+      "url": "https://api.mpaka.dev"
+    }
+  ]
+}
