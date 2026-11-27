@@ -38,7 +38,7 @@ cp "$release"/* "$server_root/cli/releases/v0.1.0/"
 printf 'v0.1.0\n' > "$server_root/cli/latest-v2"
 
 cert="$work/cert.pem"
-openssl req -x509 -newkey rsa:2048 -nodes -keyout "$work/tls-key.pem" -out "$cert" -days 1 -subj '/CN=localhost' 2>/dev/null
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$work/tls-key.pem" -out "$cert" -days 1 -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost' 2>/dev/null
 port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 (cd "$server_root" && openssl s_server -quiet -WWW -accept "$port" -cert "$cert" -key "$work/tls-key.pem" >"$work/server.log" 2>&1) &
 server_pid=$!
