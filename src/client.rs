@@ -805,6 +805,116 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn creates_python_environment_with_openapi_route_and_idempotency_header() {
+        let server = spawn_server(Router::new().route(
+            "/v1/environments",
+            post(|request: axum::extract::Request| async move {
+                assert_eq!(
+                    request
+                        .headers()
+                        .get("authorization")
+                        .and_then(|value| value.to_str().ok()),
+                    Some("Bearer api-key")
+                );
+                assert_eq!(
+                    request
+                        .headers()
+                        .get("idempotency-key")
+                        .and_then(|value| value.to_str().ok()),
+                    Some("env-create-1")
+                );
+                let body = axum::body::to_bytes(request.into_body(), usize::MAX)
+                    .await
+                    .expect("body");
+                assert_eq!(
+                    serde_json::from_slice::<serde_json::Value>(&body).expect("json"),
+                    json!({"requirements":["requests==2.32.3"]})
+                );
+                (
+                    StatusCode::ACCEPTED,
+                    Json(json!({
+                        "id":"00000000-0000-0000-0000-000000000003",
+                        "status":"queued",
+                        "requirements":["requests==2.32.3"],
+                        "artifact_sha256":null,
+                        "artifact_size_bytes":null,
+                        "resolved_digest":null,
+                        "created_at":"2026-11-27T10:00:00Z",
+                        "updated_at":"2026-11-27T10:00:00Z"
+                    })),
+                )
+            }),
+        ))
+        .await;
+        let client = AuthClient::new(&server).expect("client");
+
+        let environment = client
+            .post_api_json(
+                "api-key",
+                "/v1/environments",
+                &json!({"requirements":["requests==2.32.3"]}),
+                "env-create-1",
+            )
+            .await
+            .expect("environment accepted");
+
+        assert_eq!(environment["status"], "queued");
+        assert_eq!(environment["requirements"][0], "requests==2.32.3");
+    }
+
+    #[tokio::test]
+    async fn preserves_environment_validation_and_not_found_api_error_codes() {
+        let server = spawn_server(
+            Router::new()
+                .route(
+                    "/v1/environments",
+                    post(|| async {
+                        (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({"error":{"code":"invalid_requirements","message":"pin each package"}})),
+                        )
+                    }),
+                )
+                .route(
+                    "/v1/environments/00000000-0000-0000-0000-000000000003",
+                    get(|| async {
+                        (
+                            StatusCode::NOT_FOUND,
+                            Json(json!({"error":{"code":"environment_not_found","message":"not found"}})),
+                        )
+                    }),
+                ),
+        )
+        .await;
+        let client = AuthClient::new(&server).expect("client");
+
+        assert_eq!(
+            client
+                .post_api_json(
+                    "api-key",
+                    "/v1/environments",
+                    &json!({"requirements":["requests"]}),
+                    "env-invalid-1",
+                )
+                .await,
+            Err(ClientError::Api {
+                code: "invalid_requirements".into()
+            })
+        );
+        assert_eq!(
+            client
+                .get_api_json(
+                    "api-key",
+                    "/v1/environments/00000000-0000-0000-0000-000000000003",
+                )
+                .await,
+            Err(ClientError::Api {
+                code: "environment_not_found".into()
+            })
+        );
+    }
+
+    #[tokio::test]
     async fn gets_an_execution_result_and_maps_api_errors() {
         let server = spawn_server(
             Router::new()
