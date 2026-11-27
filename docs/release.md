@@ -91,6 +91,31 @@ MPAKA_CLI_PUBLIC_BASE_URL=https://cli.mpaka.dev \
 If verification fails, restore the previous `latest-v2` value and investigate
 the Worker/R2 or Access change before attempting another rollback.
 
+## Native clean-install lifecycle acceptance
+
+The public acceptance script above validates release pointers, signatures,
+artifact hashes, installer downloads, and endpoint topology. It does not
+exercise the CLI against a tenant. Before calling a release distribution
+validated, run the following acceptance separately on native Linux, macOS, and
+Windows machines using a disposable test tenant:
+
+1. Start with a fresh temporary user profile and install from the public
+   channel using the platform installer shown in `docs/cli.md`. Check
+   `mpaka --version` against the version at `latest-v2`.
+2. Log in to the test tenant with `--password-stdin`, create a short-lived
+   execution API key, and pass it only through `MPAKA_API_KEY`.
+3. Create an environment from a pinned requirements file, retain its ID from
+   `environments create --json`, then run `environments wait <ID> --json` and
+   confirm the response is `ready`.
+4. Run a small Python file with `--environment <ID> --json`; confirm the JSON
+   reports a successful exit code and the expected stdout.
+5. Revoke the temporary API key and remove the temporary local profile. Keep
+   credentials and API-key output out of logs and artifacts.
+
+Record the release version and native OS for each run. A signed manifest or a
+cross-compiled binary smoke check does not replace this tenant-backed native
+install and execution check.
+
 ## Key rotation
 
 The original release key was retired in two steps:
