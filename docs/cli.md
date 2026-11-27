@@ -131,6 +131,7 @@ mpaka run --file script.py --vcpu-count 2 --memory-mb 512
 cat script.py | mpaka run --stdin
 mpaka environments create --requirements requirements.txt
 mpaka environments list
+mpaka environments list --page 2 --page-size 50
 mpaka environments get <ENVIRONMENT_ID>
 mpaka environments wait <ENVIRONMENT_ID> --wait-timeout-ms 60000
 mpaka run --file script.py --environment <ENVIRONMENT_ID>
@@ -198,7 +199,13 @@ known state and leaves the remote execution running.
 
 `environments create` accepts a text file with up to 32 pinned requirements.
 Environment creation is asynchronous; use `environments wait` and then pass
-the ready environment ID to `run --environment`.
+the ready environment ID to `run --environment`. `environments list` accepts
+`--page` and `--page-size` (defaults `1` and `25`) and passes them to the API as
+`page` and `page_size`. `environments wait` prints the final response, including
+with `--json`; `ready` exits successfully, while `failed` exits non-zero. Its
+`--wait-timeout-ms` deadline covers each HTTP request as well as the polling
+interval, and a timeout prints the last response received before exiting
+non-zero.
 
 The command prints status, mode, exit code, stdout, and stderr. A zero process
 exit code means the API reports `completed`, the result is not

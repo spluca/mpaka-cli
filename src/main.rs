@@ -109,7 +109,7 @@ struct WaitExecutionArgs {
 #[derive(Debug, Subcommand)]
 enum EnvironmentsCommand {
     Create(EnvironmentCreateArgs),
-    List(OutputArgs),
+    List(EnvironmentListArgs),
     Get(EnvironmentIdArgs),
     Wait(WaitEnvironmentArgs),
 }
@@ -145,6 +145,16 @@ struct EnvironmentCreateArgs {
     idempotency_key: Option<String>,
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Debug, Args)]
+struct EnvironmentListArgs {
+    #[arg(long)]
+    json: bool,
+    #[arg(long, default_value_t = 1)]
+    page: u32,
+    #[arg(long, default_value_t = 25)]
+    page_size: u32,
 }
 
 #[derive(Debug, Args)]
@@ -248,6 +258,8 @@ enum CliError {
     MissingExecutionApiKey,
     InvalidRunInput(&'static str),
     PollingTimeout { id: String, status: String },
+    EnvironmentPollingTimeout { id: String, status: String },
+    EnvironmentFailed(String),
     ExecutionFailed(String),
 }
 
@@ -269,6 +281,11 @@ impl fmt::Display for CliError {
                 formatter,
                 "execution polling limit reached for {id}; last known status: {status}"
             ),
+            Self::EnvironmentPollingTimeout { id, status } => write!(
+                formatter,
+                "environment polling deadline reached for {id}; last known status: {status}"
+            ),
+            Self::EnvironmentFailed(id) => write!(formatter, "environment build failed for {id}"),
             Self::ExecutionFailed(message) => formatter.write_str(message),
         }
     }
@@ -567,10 +584,8 @@ async fn run_environments(
             print_api_value(value, args.json)?;
         }
         EnvironmentsCommand::List(args) => {
-            print_api_value(
-                client.get_api_json(&api_key, "/v1/environments").await?,
-                args.json,
-            )?;
+            let path = environment_list_path(args.page, args.page_size);
+            print_api_value(client.get_api_json(&api_key, &path).await?, args.json)?;
         }
         EnvironmentsCommand::Get(args) => {
             let id = Uuid::parse_str(&args.id).map_err(|_| ClientError::InvalidId)?;
@@ -583,26 +598,14 @@ async fn run_environments(
         }
         EnvironmentsCommand::Wait(args) => {
             let id = Uuid::parse_str(&args.id).map_err(|_| ClientError::InvalidId)?;
-            let deadline =
-                tokio::time::Instant::now() + Duration::from_millis(args.wait_timeout_ms);
-            loop {
-                let value = client
-                    .get_api_json(&api_key, &format!("/v1/environments/{id}"))
-                    .await?;
-                let status = environment_status(&value);
-                if matches!(status.as_str(), "ready" | "failed" | "cancelled") {
-                    print_api_value(value, args.json)?;
-                    break;
+            match wait_environment(client, &api_key, &id.to_string(), args.wait_timeout_ms).await {
+                Ok(value) => print_api_value(value, args.json)?,
+                Err(failure) => {
+                    if let Some(value) = failure.response {
+                        print_api_value(value, args.json)?;
+                    }
+                    return Err(failure.error);
                 }
-                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-                if remaining.is_zero() {
-                    print_api_value(value, args.json)?;
-                    return Err(CliError::PollingTimeout {
-                        id: id.to_string(),
-                        status,
-                    });
-                }
-                tokio::time::sleep(POLL_INTERVAL.min(remaining)).await;
             }
         }
     }
@@ -615,6 +618,85 @@ fn environment_status(value: &serde_json::Value) -> String {
         .and_then(serde_json::Value::as_str)
         .unwrap_or("unknown")
         .to_owned()
+}
+
+fn environment_list_path(page: u32, page_size: u32) -> String {
+    format!("/v1/environments?page={page}&page_size={page_size}")
+}
+
+struct EnvironmentWaitFailure {
+    error: CliError,
+    response: Option<serde_json::Value>,
+}
+
+async fn wait_environment(
+    client: &AuthClient,
+    api_key: &str,
+    id: &str,
+    wait_timeout_ms: u64,
+) -> Result<serde_json::Value, EnvironmentWaitFailure> {
+    if wait_timeout_ms == 0 {
+        return Err(EnvironmentWaitFailure {
+            error: CliError::InvalidRunInput("wait timeout must be positive"),
+            response: None,
+        });
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(wait_timeout_ms);
+    let path = format!("/v1/environments/{id}");
+    let mut last_response = None;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(environment_wait_timeout(id, last_response));
+        }
+        match tokio::time::timeout_at(deadline, client.get_api_json(api_key, &path)).await {
+            Ok(Ok(value)) => {
+                let status = environment_status(&value);
+                last_response = Some(value.clone());
+                match status.as_str() {
+                    "ready" | "cancelled" => return Ok(value),
+                    "failed" => {
+                        return Err(EnvironmentWaitFailure {
+                            error: CliError::EnvironmentFailed(id.to_owned()),
+                            response: last_response,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            Err(_) => {
+                return Err(environment_wait_timeout(id, last_response));
+            }
+            Ok(Err(error)) => {
+                return Err(EnvironmentWaitFailure {
+                    error: CliError::Client(error),
+                    response: last_response,
+                });
+            }
+        }
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(environment_wait_timeout(id, last_response));
+        }
+        tokio::time::sleep(POLL_INTERVAL.min(remaining)).await;
+    }
+}
+
+fn environment_wait_timeout(
+    id: &str,
+    response: Option<serde_json::Value>,
+) -> EnvironmentWaitFailure {
+    let status = response
+        .as_ref()
+        .map(environment_status)
+        .unwrap_or_else(|| "unknown".to_owned());
+    EnvironmentWaitFailure {
+        error: CliError::EnvironmentPollingTimeout {
+            id: id.to_owned(),
+            status,
+        },
+        response,
+    }
 }
 
 fn read_requirements(path: &std::path::Path) -> Result<Vec<String>, CliError> {
@@ -944,6 +1026,7 @@ mod tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
     #[test]
     fn exposes_register_and_login_without_a_password_argument() {
@@ -1139,6 +1222,30 @@ mod tests {
             .is_ok()
         );
         assert!(Cli::try_parse_from(["mpaka", "environments", "list", "--json"]).is_ok());
+        let cli = Cli::try_parse_from([
+            "mpaka",
+            "environments",
+            "list",
+            "--page",
+            "3",
+            "--page-size",
+            "40",
+        ])
+        .expect("environment list pagination");
+        let Command::Environments(EnvironmentsCommand::List(args)) = cli.command else {
+            panic!("expected environment list command");
+        };
+        assert_eq!((args.page, args.page_size), (3, 40));
+        let cli = Cli::try_parse_from(["mpaka", "environments", "list"])
+            .expect("default environment list pagination");
+        let Command::Environments(EnvironmentsCommand::List(args)) = cli.command else {
+            panic!("expected environment list command");
+        };
+        assert_eq!((args.page, args.page_size), (1, 25));
+        assert_eq!(
+            environment_list_path(args.page, args.page_size),
+            "/v1/environments?page=1&page_size=25"
+        );
     }
 
     #[test]
@@ -1146,6 +1253,172 @@ mod tests {
         let value = serde_json::json!({"status": "building"});
         assert_eq!(environment_status(&value), "building");
         assert_eq!(environment_status(&serde_json::json!({})), "unknown");
+    }
+
+    #[tokio::test]
+    async fn environment_wait_returns_ready_response_successfully() {
+        let id = "00000000-0000-0000-0000-000000000001";
+        let server = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+        let address = server.local_addr().expect("address");
+        let app = Router::new().route(
+            &format!("/v1/environments/{id}"),
+            get(|| async {
+                Json(json!({"id":"00000000-0000-0000-0000-000000000001","status":"ready"}))
+            }),
+        );
+        tokio::spawn(async move { axum::serve(server, app).await.expect("server") });
+        let client = AuthClient::new(&format!("http://{address}")).expect("client");
+
+        let result = wait_environment(&client, "api-key", id, 1_000).await;
+
+        let value = match result {
+            Ok(value) => value,
+            Err(_) => panic!("ready environment should succeed"),
+        };
+        assert_eq!(value["status"], "ready");
+    }
+
+    #[tokio::test]
+    async fn environment_wait_preserves_failed_response_and_returns_failure() {
+        let id = "00000000-0000-0000-0000-000000000001";
+        let server = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+        let address = server.local_addr().expect("address");
+        let app = Router::new().route(
+            &format!("/v1/environments/{id}"),
+            get(|| async { Json(json!({"id":"00000000-0000-0000-0000-000000000001","status":"failed","error":"build failed"})) }),
+        );
+        tokio::spawn(async move { axum::serve(server, app).await.expect("server") });
+        let client = AuthClient::new(&format!("http://{address}")).expect("client");
+
+        let failure = wait_environment(&client, "api-key", id, 1_000)
+            .await
+            .expect_err("failed environment must fail the command");
+
+        assert_eq!(
+            failure.response.expect("structured response")["status"],
+            "failed"
+        );
+        assert!(matches!(failure.error, CliError::EnvironmentFailed(_)));
+    }
+
+    #[tokio::test]
+    async fn environment_wait_timeout_returns_last_structured_response() {
+        let id = "00000000-0000-0000-0000-000000000001";
+        let server = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+        let address = server.local_addr().expect("address");
+        let app = Router::new().route(
+            &format!("/v1/environments/{id}"),
+            get(|| async {
+                Json(json!({"id":"00000000-0000-0000-0000-000000000001","status":"building"}))
+            }),
+        );
+        tokio::spawn(async move { axum::serve(server, app).await.expect("server") });
+        let client = AuthClient::new(&format!("http://{address}")).expect("client");
+
+        let failure = wait_environment(&client, "api-key", id, 25)
+            .await
+            .expect_err("pending environment must hit deadline");
+
+        assert_eq!(
+            failure.response.expect("last response")["status"],
+            "building"
+        );
+        assert!(
+            matches!(failure.error, CliError::EnvironmentPollingTimeout { status, .. } if status == "building")
+        );
+    }
+
+    #[tokio::test]
+    async fn environment_wait_deadline_bounds_a_slow_http_response() {
+        let id = "00000000-0000-0000-0000-000000000001";
+        let requests = Arc::new(AtomicUsize::new(0));
+        let handler_requests = Arc::clone(&requests);
+        let server = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+        let address = server.local_addr().expect("address");
+        let app = Router::new().route(
+            &format!("/v1/environments/{id}"),
+            get(move || {
+                let request = handler_requests.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if request > 0 {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        return Json(
+                            json!({"id":"00000000-0000-0000-0000-000000000001","status":"ready"}),
+                        );
+                    }
+                    Json(json!({"id":"00000000-0000-0000-0000-000000000001","status":"building"}))
+                }
+            }),
+        );
+        tokio::spawn(async move { axum::serve(server, app).await.expect("server") });
+        let client = AuthClient::new(&format!("http://{address}")).expect("client");
+
+        let failure = tokio::time::timeout(
+            Duration::from_millis(450),
+            wait_environment(&client, "api-key", id, 300),
+        )
+        .await
+        .expect("wait must stop within its deadline")
+        .expect_err("slow ready response must not extend deadline");
+
+        assert!(requests.load(Ordering::SeqCst) >= 2);
+        assert_eq!(
+            failure.response.expect("last completed response")["status"],
+            "building"
+        );
+        assert!(
+            matches!(failure.error, CliError::EnvironmentPollingTimeout { status, .. } if status == "building")
+        );
+    }
+
+    #[tokio::test]
+    async fn environment_wait_deadline_covers_a_stalled_response_body() {
+        let id = "00000000-0000-0000-0000-000000000001";
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+        let address = listener.local_addr().expect("address");
+        tokio::spawn(async move {
+            for request_index in 0..2 {
+                let (mut stream, _) = listener.accept().await.expect("request");
+                let mut request = [0; 1024];
+                let _ = stream.read(&mut request).await.expect("read request");
+                if request_index == 0 {
+                    let body =
+                        r#"{"id":"00000000-0000-0000-0000-000000000001","status":"building"}"#;
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    stream
+                        .write_all(response.as_bytes())
+                        .await
+                        .expect("write response");
+                } else {
+                    stream
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{\"status\":")
+                        .await
+                        .expect("write partial response");
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+            }
+        });
+        let client = AuthClient::new(&format!("http://{address}")).expect("client");
+
+        let failure = tokio::time::timeout(
+            Duration::from_millis(450),
+            wait_environment(&client, "api-key", id, 300),
+        )
+        .await
+        .expect("wait must stop within its deadline")
+        .expect_err("stalled response body must hit deadline");
+
+        assert_eq!(
+            failure.response.expect("last completed response")["status"],
+            "building"
+        );
+        assert!(
+            matches!(failure.error, CliError::EnvironmentPollingTimeout { status, .. } if status == "building")
+        );
     }
 
     #[test]
